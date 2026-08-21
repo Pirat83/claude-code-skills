@@ -801,11 +801,24 @@ auto-loaded context budget.
      step 2 performs, over each rule file. Rules load automatically on every
      turn exactly like CLAUDE.md, so a phantom name here has identical blast
      radius and is worth the same flag.
-4. Compute total context budget:
-   - Sum: project CLAUDE.md + global CLAUDE.md + every rule file +
-     `MEMORY.md` + every memory file referenced from `MEMORY.md`.
-   - **`[budget-warning]`** if total > 50 KB.
-   - **`[budget-critical]`** if total > 100 KB.
+4. Compute the context budget. Count only what the harness loads on **every
+   turn**, because that is the cost the thresholds are calibrated against:
+   - project CLAUDE.md + global CLAUDE.md, plus anything they `@`-import
+     (an imported file is auto-loaded exactly like its importer, so it counts)
+   - every file under `.claude/rules/`
+   - `MEMORY.md` — the index only
+
+   Individual memory files are **not** in this total. They load when a memory is
+   recalled, not every turn, so counting the pool inflates the figure by however
+   much history the user has accumulated and reports `[budget-critical]` on a
+   setup that is nowhere near it. A flag that fires on healthy config is worse
+   than no flag: it trains the reader to skip the line.
+
+   - **`[budget-warning]`** if the per-turn total > 50 KB.
+   - **`[budget-critical]`** if the per-turn total > 100 KB.
+
+   Report the recall-time memory pool on its own line as context, unflagged. It
+   is a real cost, just not a per-turn one, and its size is the user's call.
 5. Emit:
 
 ```
@@ -813,10 +826,12 @@ Phase 8 — Rules & Context Budget
   Rules:               {N} files, {total_kb} KB total
 
   Budget breakdown:
-    CLAUDE.md (project + global):  {kb} KB
-    Rules (.claude/rules/):        {kb} KB
-    Memory (MEMORY.md + files):    {kb} KB
-    Total auto-loaded per turn:    {kb} KB  [{OK | budget-warning | budget-critical}]
+    CLAUDE.md (project + global + imports):  {kb} KB
+    Rules (.claude/rules/):                  {kb} KB
+    Memory index (MEMORY.md):                {kb} KB
+    Total auto-loaded per turn:              {kb} KB  [{OK | budget-warning | budget-critical}]
+
+    Memory pool (loads on recall, not counted above): {kb} KB across {N} files
 
   Issues:
   - [oversized]   rules/code-style/patterns.md — 22 KB (target: <3 KB)
@@ -1103,7 +1118,7 @@ Applies to any edit that touches `~/.claude/settings.json`:
    ```json
    {
      "applied_at": "<iso>",
-     "target": "/home/pirat/.claude/settings.json",
+     "target": "~/.claude/settings.json",
      "diff_sha256": "<sha256 of the unified diff>"
    }
    ```

@@ -182,9 +182,9 @@ Show all frames with one-line summaries.
 
 ```
 Stack (3 frames):
-  #3 [top] "Found login bug" — 5 steps, 2 open (2026-03-25, ~/Projects/freelance-automation)
+  #3 [top] "Found login bug" — 5 steps, 2 open (2026-03-25, ~/Projects/api-service)
   #2       "Refactor auth module" — 3 steps, 3 open (2026-03-24, ~/Projects/web-app)
-  #1       "Initial pipeline work" — 7 steps, 1 open (2026-03-23, ~/Projects/freelance-automation)
+  #1       "Initial pipeline work" — 7 steps, 1 open (2026-03-23, ~/Projects/api-service)
 ```
 
 ---
