@@ -35,12 +35,24 @@ Run phases in order. For each phase, follow the numbered steps exactly, then
 emit the output template. After Phase 10, present the summary and wait for
 user approval before running Phase 11.
 
-Use the `Read` tool for files and the `Grep` tool for searching — never use
-bash `cat`, `grep`, or `rg` for in-skill reads. (Why: `Read`/`Grep` go through
-the harness's permission and telemetry layers; bash equivalents bypass them
-and obscure what the skill actually consulted.) The `Bash` tool is reserved
-for shell-only operations: `gh release list`, the `state_io.sh` /
-`upstream_probe.sh` helper scripts, and atomic file moves.
+**Reading and searching.** Prefer the dedicated tools — `Read` for files, `Grep`
+for content search, `Glob` for listing paths — because they go through the
+harness's permission and telemetry layers, while bash equivalents bypass both
+and obscure what the audit actually consulted.
+
+Prefer, not require: `Grep` and `Glob` are not offered to every session, and a
+skill that insists on a tool the session does not have cannot run at all. Check
+what you actually have before the first read. Where a dedicated tool is missing,
+use the `Bash` equivalent (`grep`, `find`, `sed -n`) and **say so once** in the
+Phase 1 output, so the reader knows this run's evidence came through a different
+path. Do not silently substitute, and do not stall.
+
+Steps below name operations rather than tools for this reason: "list `*/SKILL.md`
+under `~/.claude/skills/`" is satisfiable either way; `Glob(...)` is not.
+
+`Bash` is required regardless for shell-only operations: `gh release list`, the
+`state_io.sh` / `upstream_probe.sh` helpers, the binary probe in **Name
+resolution**, and atomic file moves.
 
 ## Design principles
 
@@ -84,7 +96,7 @@ gets the same verdict wherever it appears:
 ```
 name → Phase 1's live block (tools_available / agents_available / skills_available)
   ├─ found              → OK
-  └─ not found          → Bash: grep -ac "<Name>" "$(readlink -f ~/.local/bin/claude)"
+  └─ not found          → Bash: grep -ac '"<Name>"' "$(readlink -f ~/.local/bin/claude)"
                             ├─ hits > 0  → [gated-tool]
                             └─ hits = 0  → [phantom-tool]
 ```
@@ -97,6 +109,13 @@ rule for a tool that returns next month is the wrong repair, and the two cases
 are indistinguishable from the live list alone; only the binary tells them
 apart. The grep runs solely on names that already failed to resolve, so its
 cost stays proportional to the problem rather than to the size of the config.
+
+**Match the quoted token, not the bare name.** Tool names appear in the binary's
+registry as `"Name"`, and an unquoted search matches every substring: `LS`
+returns 3078 raw hits against 1 quoted. Short names are the risk — a genuinely
+fictional two- or three-letter name will collide with ordinary text and be
+reported as gated, which is the precise error the two flags exist to prevent,
+and it fails in the direction that tells the user to keep a dead reference.
 
 Report a `[gated-tool]` with the advice to scope the reference ("when
 available") rather than remove it, and say which gate is plausible if the
@@ -181,9 +200,9 @@ upstream state (unless `--offline`), print the "since last tune-up" banner.
    `[withdrawn]` this run — there is nothing to compare against yet.
 2. Recompute the `local` block:
    - `claude_code_cli_version`: `Bash("claude --version 2>/dev/null | head -1")`
-   - `agents_present`: `Glob("*.md", path=".claude/agents/")`, strip `.md`
-   - `skills_present`: `Glob("*/SKILL.md", path=".claude/skills/")` plus
-     `Glob("*/SKILL.md", path="~/.claude/skills/")`, strip `/SKILL.md`
+   - `agents_present`: list `*.md` in `.claude/agents/`, strip `.md`
+   - `skills_present`: list `*/SKILL.md` in `.claude/skills/` plus
+     `~/.claude/skills/`, strip `/SKILL.md`
    - `plugins_present`: parse `~/.claude/plugins/installed_plugins.json`,
      extract every `plugins.*` key
    - `mcp_servers`: parse `<project>/.mcp.json` `mcpServers` keys plus
@@ -378,10 +397,10 @@ and the upstream live built-in list.
 
 **Steps.**
 
-1. List project agents: `Glob("*.md", path=".claude/agents/")`. If the
-   directory is missing, report and continue.
-2. List global agents: `Glob("*.md", path="~/.claude/agents/")`.
-3. List plugin agents: `Glob("*/agents/*.md", path="~/.claude/plugins/cache/")`.
+1. List project agents: `*.md` in `.claude/agents/`. If the directory is
+   missing, report and continue.
+2. List global agents: `*.md` in `~/.claude/agents/`.
+3. List plugin agents: `*/agents/*.md` under `~/.claude/plugins/cache/`.
 4. For each project agent, read the first 30 lines.
 5. Apply checks:
    - **`[mismatch]`** — project agent filename matches a name in
@@ -399,7 +418,7 @@ and the upstream live built-in list.
      - `Dockerfile` / `docker-compose.yml` → expect a docker agent
      - `pyproject.toml` mentions `pandas`/`numpy` → expect a data agent
    - **`[unused]`** — globally-installed or plugin-provided agent never
-     referenced in this project's tree (`Grep` for the bare name across
+     referenced in this project's tree (search for the bare name across
      `.claude/`, `CLAUDE.md`, top-level docs).
    - **`[phantom-tool]` / `[gated-tool]`** — an agent definition's `tools:`
      frontmatter names a tool that does not resolve (see **Name resolution**).
@@ -449,7 +468,7 @@ and on-disk copies as the source of truth.
 
 **Steps.**
 
-1. List all skills via `Glob`.
+1. List all skills across the three locations above.
 2. For each project + global skill, read the full SKILL.md.
 3. Apply checks:
    - **`[mismatch]`** — SKILL.md contains `Allowed Commands` or `Bash(...)`
@@ -550,7 +569,7 @@ project-level usage. Disk-only — no network.
    - **`[mismatch]`** (channel) — plugin's `channel` field, when present
      (v3+ schema), differs from marketplace's recommended channel.
    - **`[unused]`** — installed plugin's namespace (e.g. `playwright@`)
-     never appears in this project's tree (`Grep` across `.claude/`,
+     never appears in this project's tree (search across `.claude/`,
      `CLAUDE.md`, top-level docs).
    - **`[new-feature]`** — plugin in `upstream_current.marketplace_plugins`
      but not in `upstream_at_last_run.marketplace_plugins` and not in
@@ -763,7 +782,7 @@ auto-loaded context budget.
 
 **Steps.**
 
-1. List rule files via `Glob("**/*.md", path=".claude/rules/")`. If none,
+1. List rule files: `**/*.md` under `.claude/rules/`. If none,
    report "No rules directory" and skip rule-specific checks (still run
    the budget computation).
 2. For each rule file, measure size in bytes.
@@ -846,11 +865,30 @@ adoption gaps; (3) notification-sink coverage for long-running work;
    - `PascalCase` or `mcp__*` (`` `TaskCreate` ``, `` `mcp__github__get_issue` ``)
      → tool
 
+   **Split multi-name spans.** One pair of backticks often holds a list —
+   `` `TaskCreate,TaskUpdate,TaskList,TaskGet` `` is four names, not one
+   unmatchable string. Split on commas, slashes and the word "and", then resolve
+   each part. A pattern anchored to a whole backtick span silently skips exactly
+   the densest references, which are the ones most worth catching.
+
    Exclude obvious non-names (paths with an interior `/`, code keywords, and
    PascalCase words that are plainly prose rather than identifiers — `README`,
    `JSON`, `HTTP`). When a name is ambiguous, resolving it is cheap and a false
    `[phantom-tool]` is expensive, so resolve rather than guess.
-3. Apply CLAUDE.md checks:
+
+3. **Separate use from mention.** Only flag a name the document tells the reader
+   to *invoke*. A name can also be discussed — listed in a table of rule forms,
+   quoted while explaining what some other check does, named in a sentence about
+   naming. Those are mentions, and flagging them produces findings whose only
+   possible repair is to stop writing about the subject.
+
+   The test is whether removing the tool would make the surrounding sentence
+   false or merely unnecessary. "Call `Grep` to search" breaks; "rules naming
+   `MultiEdit` are never consulted" stays true and is precisely the sentence you
+   want to keep. When genuinely unsure, prefer the mention reading and stay
+   silent — a missed phantom costs one stale line, while a false one sends the
+   user to delete working documentation.
+4. Apply CLAUDE.md checks:
    - **`[stale-ref]`** — agent name (no `/` prefix) backtick-quoted but
      no matching file in any agent location.
    - **`[stale-ref]`** — skill name (`/`-prefixed) backtick-quoted but
@@ -872,11 +910,11 @@ adoption gaps; (3) notification-sink coverage for long-running work;
      architecture but `.claude/rules/` already has auto-loaded rules
      (rules are loaded automatically — explicit reading instructions
      waste context).
-4. Apply coordinator checks:
+5. Apply coordinator checks:
    - **`[unused]`** — globally-installed coordinator (file ends
      `-coordinator.md` OR description mentions "routes to" / "delegates
      to") not referenced in this project's CLAUDE.md.
-5. Apply notification-sink checks:
+6. Apply notification-sink checks:
    - Detect long-running work: any `.claude/skills/*/SKILL.md` mentions
      `run_in_background`, `Bash run_in_background=true`, or backtest /
      long-job patterns.
@@ -884,7 +922,7 @@ adoption gaps; (3) notification-sink coverage for long-running work;
      `Notification`) writing to a sink, or MCP servers matching
      `PushNotification`, `RemoteTrigger`, slack/discord/teams.
    - **`[missing]`** — long-running work detected AND no sink configured.
-6. Apply CLAUDE.md quality scoring (sub-check 4). Invoke
+7. Apply CLAUDE.md quality scoring (sub-check 4). Invoke
    `/claude-md-management:claude-md-improver` in **report-only mode** —
    tell it explicitly to emit only its Phase 3 quality report (per-file
    grade table + top-3 issues) and to NOT proceed to its Phase 4 edit
@@ -900,7 +938,7 @@ adoption gaps; (3) notification-sink coverage for long-running work;
    is < B AND the user approves the corresponding Phase 10 item, Phase 11
    hands the edit pass back to the improver (its built-in confirmation
    gate covers the actual diff).
-7. Emit:
+8. Emit:
 
 ```
 Phase 9 — CLAUDE.md, Coordinators & Notification Sinks
