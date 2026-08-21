@@ -31,9 +31,10 @@ fi
 default_schema() {
     cat <<'EOF'
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "last_run_iso": null,
   "local": {},
+  "live": {},
   "upstream_at_last_run": {},
   "acknowledged_upstream_features": [],
   "pending_ansible_mirror": []

@@ -66,11 +66,41 @@ for shell-only operations: `gh release list`, the `state_io.sh` /
 | `[upgrade-available]` | New version available in marketplace/CLI release |
 | `[adopt]` | Codebase pattern suggests adopting an automation (hook, subagent, skill, plugin, MCP) — sole source: Phase 10 via `/claude-code-setup:claude-automation-recommender` |
 | `[new-feature]` | Upstream added something since last tune-up |
+| `[withdrawn]` | Was available to this session last run, is not now |
+| `[phantom-tool]` | A name in config resolves to no tool anywhere — delete the reference |
+| `[gated-tool]` | Names a tool that exists in the CLI but is withheld from this session — keep the reference, scope it |
 | `[mismatch]` | Local config inconsistent with stated policy |
 | `[missing]` | Something expected from project type/tech stack is absent |
 | `[oversized]` | Exceeds size threshold |
 | `[quality:A]` … `[quality:F]` | CLAUDE.md quality grade from `claude-md-improver` (Phase 9) |
 | `[budget-warning]` / `[budget-critical]` | Context budget thresholds |
+
+### Name resolution (shared by Phases 2, 3, 4, 7, 8, 9)
+
+Several phases check whether a name written in config actually refers to
+something the harness will resolve. They all use this one ladder, so a name
+gets the same verdict wherever it appears:
+
+```
+name → Phase 1's live block (tools_available / agents_available / skills_available)
+  ├─ found              → OK
+  └─ not found          → Bash: grep -ac "<Name>" "$(readlink -f ~/.local/bin/claude)"
+                            ├─ hits > 0  → [gated-tool]
+                            └─ hits = 0  → [phantom-tool]
+```
+
+The second step matters because "unavailable" has two causes with opposite
+fixes. A name can be fictional — it never existed, and the reference should be
+deleted. Or it can be a real tool the CLI ships but withholds from this
+session, via a remote feature flag or a model-version threshold. Deleting a
+rule for a tool that returns next month is the wrong repair, and the two cases
+are indistinguishable from the live list alone; only the binary tells them
+apart. The grep runs solely on names that already failed to resolve, so its
+cost stays proportional to the problem rather than to the size of the config.
+
+Report a `[gated-tool]` with the advice to scope the reference ("when
+available") rather than remove it, and say which gate is plausible if the
+surrounding evidence shows one.
 
 ### State file: `<project>/.claude/.tune-up-state.json`
 
@@ -78,7 +108,7 @@ Single JSON document, gitignored by default. Schema:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "last_run_iso": "2026-05-02T19:14:00Z",
   "local": {
     "claude_code_cli_version": "v2.3.1",
@@ -89,13 +119,18 @@ Single JSON document, gitignored by default. Schema:
     "settings_hooks_fingerprint": "sha256-of-merged-hooks",
     "installed_plugins_fingerprint": "sha256-of-installed_plugins.json"
   },
+  "live": {
+    "observed_with_model": "claude-opus-5",
+    "tools_available": ["..."],
+    "agents_available": ["..."],
+    "skills_available": ["..."],
+    "hook_events_available": ["..."]
+  },
   "upstream_at_last_run": {
     "claude_code_latest_release": "v2.3.1",
     "release_notes_max_date": "2026-04-30",
     "marketplace_plugins": ["..."],
-    "built_in_agents": ["..."],
-    "built_in_tools": ["..."],
-    "hook_events": ["..."]
+    "announced_features": ["..."]
   },
   "acknowledged_upstream_features": ["agent:data-engineer", "..."],
   "pending_ansible_mirror": [
@@ -118,11 +153,18 @@ upstream state (unless `--offline`), print the "since last tune-up" banner.
 **Sources.**
 - `<project>/.claude/.tune-up-state.json` (or initialise if absent).
 - Project tree (for local fingerprints).
+- **The running session itself** — the in-context tool, agent and skill
+  listings, plus `ToolSearch` to resolve deferred tools by name. This is the
+  authority on what *exists*; the release notes below are only the authority on
+  what is *new*. (Why: a tool can ship in the binary and still be withheld from
+  a session by a remote feature flag or a model-version threshold, and no
+  changelog bullet is ever written for that. Existence derived from release
+  notes cannot see it, so the audit would keep endorsing config that names
+  something the session does not have.)
 - `gh release list --repo anthropics/claude-code -L 5 --json tagName,publishedAt`
 - `claude-code-guide` subagent (primary release-notes fetcher — handles
   docs URL changes via WebSearch, then WebFetch). Raw `WebFetch` on
   `https://docs.claude.com/en/docs/claude-code/release-notes` is the fallback.
-- `mcp__openspace__search_skills` with project tech-stack query
 - `~/.claude/plugins/marketplaces/*/` (disk only)
 - `~/.claude/plugins/installed_plugins.json`
 - `~/.claude/plugins/known_marketplaces.json`
@@ -132,8 +174,11 @@ upstream state (unless `--offline`), print the "since last tune-up" banner.
 1. Run `Bash` on `${CLAUDE_SKILL_DIR}/scripts/state_io.sh read` from
    `$CLAUDE_PROJECT_DIR`. The helper prints the current snapshot JSON to
    stdout, or an empty default schema if the file is missing. Parse the
-   output. If `schema_version` is greater than `1`, emit `[stale-ref]`
-   "snapshot from a future schema; aborting" and stop the run.
+   output. If `schema_version` is greater than `2`, emit `[stale-ref]`
+   "snapshot from a future schema; aborting" and stop the run. A
+   `schema_version` of `1` predates the `live` block: accept it, treat the
+   missing block as a first-run baseline for availability, and emit no
+   `[withdrawn]` this run — there is nothing to compare against yet.
 2. Recompute the `local` block:
    - `claude_code_cli_version`: `Bash("claude --version 2>/dev/null | head -1")`
    - `agents_present`: `Glob("*.md", path=".claude/agents/")`, strip `.md`
@@ -146,13 +191,26 @@ upstream state (unless `--offline`), print the "since last tune-up" banner.
    - `settings_hooks_fingerprint`: concatenate the merged `hooks` config
      from all four settings files (in priority order) and `sha256sum`
    - `installed_plugins_fingerprint`: `sha256sum ~/.claude/plugins/installed_plugins.json`
+
+   Then recompute the `live` block — what this session actually has, which is
+   not the same question as what is installed on disk:
+   - `tools_available`: every tool name offered to this session — the base
+     toolset plus every deferred tool named in context. Resolve anything you
+     are unsure of with `ToolSearch("select:<Name>")` rather than assuming.
+   - `observed_with_model`: the model id powering this session. Record it every
+     time. Availability is model-dependent, so a tools list stored without the
+     model that observed it will read as a withdrawal the next time the user
+     runs on a different tier.
+   - `agents_available` / `skills_available`: from the in-context listings,
+     unioned with the on-disk `agents_present` / `skills_present` above.
+   - `hook_events_available`: the hook event names the harness accepts.
 3. Compute the `local_drift` diff against the snapshot's `local` block:
    added/removed agents, added/removed skills, added/removed plugins, hook
    fingerprint changed yes/no. Hold this in memory for the banner.
 4. **If `--offline`:** skip steps 5-9. Use snapshot's `upstream_at_last_run`
    as both baseline AND current (so upstream-drift checks emit nothing).
-5. **Issue steps 5a-5c in parallel** — three independent probes; the model
-   should call all three tools in a single message rather than serialising:
+5. **Issue steps 5a-5b in parallel** — two independent probes; the model
+   should call both tools in a single message rather than serialising:
    - **5a.** `Bash`-run `${CLAUDE_SKILL_DIR}/scripts/upstream_probe.sh`.
      Returns JSON with `gh_releases` (top 5 tags + dates),
      `marketplace_plugins` (sorted `plugin@marketplace` IDs),
@@ -178,22 +236,33 @@ upstream state (unless `--offline`), print the "since last tune-up" banner.
      The `claude-code-guide` arm is the primary path because it's strictly
      more capable; the raw `WebFetch` is the fallback, not the other way
      around.
-   - **5c.** `mcp__openspace__search_skills` with the project tech-stack
-     query derived from project files: detect `pyproject.toml`
-     (Python/Poetry), `*.ipynb` (notebook), `*.json5` (playbook),
-     `Dockerfile` (docker), etc. Build a comma-separated query string.
-     Hold the top-N matches.
 6. Build the `upstream_current` block from step 5's results:
    - `claude_code_latest_release` = newest `tagName` from `gh_releases`
    - `release_notes_max_date` = max `date` across `added_bullets` (or
      unchanged if zero new bullets)
    - `marketplace_plugins` = from upstream probe
-   - `built_in_agents` / `built_in_tools` / `hook_events` = read directly
-     from `added_bullets` per category; do NOT merge with snapshot values
-     (the diff in step 7 vs `upstream_at_last_run` already handles
-     baseline + acknowledgement filtering).
+   - `announced_features` = `added_bullets` grouped by category. These feed
+     `[new-feature]` only: they record what upstream *announced*, not what this
+     session *has*. Do NOT merge with snapshot values (the diff in step 7 vs
+     `upstream_at_last_run` already handles baseline + acknowledgement
+     filtering).
+   - Nothing here describes what the session *has*. `tools_available`,
+     `agents_available` and `hook_events_available` were already recorded from
+     the live probe in step 2 and are never derived from `added_bullets`.
+     Something can be announced and unavailable, or available and never
+     announced; only the live probe tells you which you are looking at.
 7. Compute `upstream_drift` diff: `upstream_current` minus
    `upstream_at_last_run`, minus already-`acknowledged_upstream_features`.
+   Then compute `availability_drift` from this run's `live` block against the
+   snapshot's:
+   - available last run, absent now → **`[withdrawn]`**
+   - available now, absent last run → `[new-feature]`
+
+   **Model guard.** If the snapshot's `observed_with_model` differs from the
+   current model, report every availability delta as informational and suppress
+   `[withdrawn]` entirely. The set is model-dependent, so a tier change already
+   explains the difference; flagging it as a withdrawal would be wrong on the
+   facts and would train the user to ignore the flag.
 8. Emit the output:
 
 ```
@@ -202,12 +271,16 @@ Phase 1 — Drift Setup
                  OR "first run, establishing baseline"
   Local CLI:     {version}
   Upstream CLI:  {version}                              {[upgrade-available] | OK}
+  Live probe:    {N} tools, {M} agents, {P} skills available to {model}
   Release notes: {N} new bullets since {date}
-  OpenSpace:     queried "{stack}", {N} hits
   Marketplace:   {N} marketplaces fresh on disk
 
   Local drift since last run:
   {one line per [+]/[-]/[Δ] item, or "no changes"}
+
+  Availability drift:
+  {one line per [withdrawn]/[new-feature] item, or "none",
+   or "model changed {old} → {new} — deltas informational this run"}
 
   Pending Ansible mirrors: {count, only if > 0 — list each target}
 ```
@@ -251,6 +324,19 @@ shared > project local**.
      `~/.claude/settings.json` or `<project>/.claude/settings.json` looks
      project-specific or host-specific (contains a `~/Projects/<name>`
      path or a binary unique to one host). Suggest demoting down.
+   - **`[mismatch]`** (dead path rule) — entry names `Write`, `NotebookEdit`,
+     `MultiEdit` or `Glob` **and** carries a path/glob argument rather than the
+     `:*` prefix syntax. File permission checks consult only `Edit(path)` and
+     `Read(path)` rules, so these never match anything and the permission the
+     user thinks they granted is not granted. Emit the rewrite:
+     `Write` / `NotebookEdit` / `MultiEdit` → `Edit`, `Glob` → `Read`.
+     Check whether the rewritten rule **already exists** in the same file — if
+     it does, the entry is dead weight rather than a missing grant, so the fix
+     is to delete it and the flag should say so. Getting this backwards
+     silently duplicates a rule that was already working.
+   - **`[phantom-tool]` / `[gated-tool]`** — entry names a tool that does not
+     resolve (see **Name resolution**). The rule can never match, because
+     nothing will ever request that tool.
 4. Emit:
 
 ```
@@ -266,6 +352,8 @@ Phase 2 — Permissions
   - [duplicate]  "Bash(npm:*)" appears in both global local and project shared
   - [mismatch]   3 entries in .claude/settings.json share prefix "Bash(poetry run pytest" — consolidate?
   - [mismatch]   "Bash(gh*)" in settings.local.json looks machine-wide → promote to ~/.claude/settings.json
+  - [mismatch]   ~/.claude/settings.json: "Write(//tmp/**)" is never consulted → "Edit(//tmp/**)" (already present — delete this entry)
+  - [phantom-tool] .claude/settings.json: "Snip(*)" — no such tool resolves
 
   (or "No issues found." if clean)
 ```
@@ -285,8 +373,8 @@ and the upstream live built-in list.
 - `<project>/.claude/agents/`
 - `~/.claude/agents/`
 - `~/.claude/plugins/cache/*/*/agents/` (plugin-provided)
-- Snapshot's `upstream_at_last_run.built_in_agents`
-- Phase 1's `upstream_current.built_in_agents`
+- Snapshot's `live.agents_available` (previous run)
+- Phase 1's `live.agents_available` (this run) — the authority on what exists
 
 **Steps.**
 
@@ -297,7 +385,7 @@ and the upstream live built-in list.
 4. For each project agent, read the first 30 lines.
 5. Apply checks:
    - **`[mismatch]`** — project agent filename matches a name in
-     `upstream_current.built_in_agents` AND the file has no
+     this run's `live.agents_available` AND the file has no
      project-specific terms (project name from `pyproject.toml` /
      `package.json`, framework class names, domain-specific tools).
      This shadows a built-in without adding value.
@@ -313,9 +401,12 @@ and the upstream live built-in list.
    - **`[unused]`** — globally-installed or plugin-provided agent never
      referenced in this project's tree (`Grep` for the bare name across
      `.claude/`, `CLAUDE.md`, top-level docs).
-   - **`[new-feature]`** — name in `upstream_current.built_in_agents`
-     but not in `upstream_at_last_run.built_in_agents` AND not in
-     `acknowledged_upstream_features`.
+   - **`[phantom-tool]` / `[gated-tool]`** — an agent definition's `tools:`
+     frontmatter names a tool that does not resolve (see **Name resolution**).
+     The agent still loads, so nothing errors; it just quietly has less reach
+     than its definition claims.
+   - **`[new-feature]`** — name in this run's `live.agents_available`
+     but not in the snapshot's AND not in `acknowledged_upstream_features`.
 
    Adoption gaps (codebase patterns suggest installing a new agent) are
    no longer audited here — Phase 10 owns that dimension via
@@ -346,14 +437,15 @@ appear only in Phase 10 (`[adopt]` flags from automation-recommender).
 
 ## Phase 4 — Skills
 
-**Subject.** Audit project + global skills, with OpenSpace registry as the
-upstream source of truth.
+**Subject.** Audit project + global skills, with the in-context skill listing
+and on-disk copies as the source of truth.
 
 **Sources.**
 - `<project>/.claude/skills/*/SKILL.md`
 - `~/.claude/skills/*/SKILL.md`
 - `~/.claude/plugins/cache/*/*/skills/*/SKILL.md` (plugin-provided)
-- Phase 1's `mcp__openspace__search_skills` results
+- Phase 1's `live.skills_available`
+- Git-tracked copies of the same skills elsewhere on disk (see `[outdated]`)
 
 **Steps.**
 
@@ -371,13 +463,23 @@ upstream source of truth.
      (verify with `Bash("test -e <path>")`).
    - **`[stale-ref]`** — references `${CLAUDE_SKILL_DIR}/scripts/<file>`
      where the file doesn't exist relative to the skill's own directory.
-   - **`[outdated]`** — locally-installed skill's last-modified date
-     predates the OpenSpace registry version's last-modified. Skipped
-     under `--offline`.
+   - **`[phantom-tool]` / `[gated-tool]`** — SKILL.md names a tool that does
+     not resolve (see **Name resolution**), whether in prose, in a Sources
+     list, or in `allowed-tools` frontmatter. A skill whose instructions call a
+     tool the session does not have fails partway through, at the point of use,
+     with no warning beforehand.
+   - **`[outdated]`** — a skill installed under `~/.claude/skills/` has a
+     git-tracked counterpart on disk that differs. Discover counterparts with
+     `Bash("find ~/Projects -maxdepth 4 -path '*/skills/*/SKILL.md' 2>/dev/null")`,
+     mirroring the Ansible-repo discovery in Phase 11, and compare by content.
+     Report the direction and size of the divergence — an installed copy ahead
+     of its repo is unbacked work that dies with the disk, while one behind its
+     repo is running stale. Both are worth knowing; neither is automatically
+     the error.
    - **`[unused]`** — globally-installed skill never referenced from this
      project tree.
 
-   Adoption gaps (registry skills the project should install) are no
+   Adoption gaps (skills the project should install) are no
    longer audited here — Phase 10 owns that dimension via
    `/claude-code-setup:claude-automation-recommender` and emits `[adopt]`
    flags in the consolidated summary.
@@ -392,7 +494,7 @@ Phase 4 — Skills
   Issues:
   - [mismatch]        /pre-commit-check carries hardcoded "Bash(pytest...)"
   - [stale-ref]       /post-push-check references docs/ci.md (does not exist)
-  - [outdated]        /post-push-check  v1.0 installed, v1.3 in OpenSpace
+  - [outdated]        /tune-up — installed 1171 lines, git copy 245 lines (installed is ahead, unbacked)
   - [unused]          /frontend-design — no UI work in this project
 
   (or "No issues found." if clean)
@@ -530,8 +632,8 @@ schema drift, and policy mismatches.
 
 **Sources.**
 - All four settings files (`hooks` block)
-- Snapshot's `upstream_at_last_run.hook_events`
-- Phase 1's `upstream_current.hook_events`
+- Snapshot's `live.hook_events_available` (previous run)
+- Phase 1's `live.hook_events_available` (this run) — the authority
 - Project-type detection: `pyproject.toml`, `environment.yml`,
   `pom.xml`, `build.gradle`, `build.gradle.kts`
 
@@ -571,11 +673,17 @@ expands to empty.
      truncate; subsequent ones should append. Mixed redirects in
      arbitrary order produce nondeterministic env content.
 5. Apply upstream checks:
-   - **`[new-feature]`** — `upstream_current.hook_events` contains a
-     name not in `upstream_at_last_run.hook_events` and not in
-     `acknowledged_upstream_features` as `hook:<name>`.
-   - **`[stale-ref]`** — settings reference a hook event no longer in
-     `upstream_current.hook_events`.
+   - **`[new-feature]`** — this run's `live.hook_events_available` contains a
+     name not in the snapshot's and not in `acknowledged_upstream_features`
+     as `hook:<name>`.
+   - **`[stale-ref]`** — settings register a hook under an event name that is
+     not in `live.hook_events_available`. This is silent in the worst way: the
+     hook is well-formed, the settings file parses, and it simply never fires.
+   - **`[phantom-tool]` / `[gated-tool]`** — a `matcher` in `PreToolUse`,
+     `PostToolUse` or `PostToolUseFailure` names a tool that does not resolve
+     (see **Name resolution**). Same silence: a matcher on a tool the harness
+     never emits is indistinguishable from a hook that simply has not
+     triggered yet.
 6. Emit:
 
 ```
@@ -589,6 +697,7 @@ Phase 7 — Hooks & Environment Activation
   - [missing]      Poetry project lacks venv-activation SessionStart hook
   - [mismatch]     hook command does not check if env exists before writing PATH
   - [new-feature]  upstream added hook event: SubagentStop
+  - [stale-ref]    settings register a hook on "PreCommit" — not an accepted event name
 
   (or "No issues found." if clean)
 ```
@@ -650,6 +759,7 @@ auto-loaded context budget.
 - `<project>/CLAUDE.md`
 - `~/.claude/CLAUDE.md`
 - Memory files (`MEMORY.md` and any files it links to)
+- Phase 1's `live` block, via **Name resolution**
 
 **Steps.**
 
@@ -667,6 +777,11 @@ auto-loaded context budget.
    - **`[duplicate]`** — rule's first heading or description matches a
      CLAUDE.md section heading. Auto-loaded rules and CLAUDE.md
      duplication wastes context.
+   - **`[phantom-tool]` / `[gated-tool]`** — the rule names a tool that does
+     not resolve (see **Name resolution**). Use the same extraction Phase 9
+     step 2 performs, over each rule file. Rules load automatically on every
+     turn exactly like CLAUDE.md, so a phantom name here has identical blast
+     radius and is worth the same flag.
 4. Compute total context budget:
    - Sum: project CLAUDE.md + global CLAUDE.md + every rule file +
      `MEMORY.md` + every memory file referenced from `MEMORY.md`.
@@ -688,6 +803,7 @@ Phase 8 — Rules & Context Budget
   - [oversized]   rules/code-style/patterns.md — 22 KB (target: <3 KB)
   - [mismatch]    rules/architecture/graph-pipeline.md scoped **/*.py but only relevant to framework/graph.py
   - [duplicate]   rules/code-style/testing.md duplicates CLAUDE.md "Testing Standards" section
+  - [gated-tool]  rules/workflow/planning.md instructs "track steps via `TaskCreate`" — exists in the CLI, withheld from this session
 
   Recommended trimming:
   For each [oversized] file: move examples/tables to docs/{path}, keep only
@@ -711,6 +827,7 @@ adoption gaps; (3) notification-sink coverage for long-running work;
 **Sources.**
 - `<project>/CLAUDE.md`
 - `~/.claude/CLAUDE.md`
+- Phase 1's `live` block, via **Name resolution**
 - `<project>/.claude/agents/*-coordinator.md` and `~/.claude/agents/*-coordinator.md`
 - All settings hooks (`Stop`, `SubagentStop`, `Notification`)
 - `<project>/.mcp.json` for sink-style servers (`PushNotification`,
@@ -722,10 +839,17 @@ adoption gaps; (3) notification-sink coverage for long-running work;
 **Steps.**
 
 1. Read project + global CLAUDE.md.
-2. Extract every backtick-quoted name that looks like an agent or skill —
-   pattern: lowercase-hyphenated (`` `python-expert` ``) or
-   slash-prefixed (`` `/run-tests` ``). Exclude obvious non-names (paths
-   with `/` interior, code keywords).
+2. Extract every backtick-quoted name that looks like an agent, a skill, or a
+   tool — three patterns:
+   - lowercase-hyphenated (`` `python-expert` ``) → agent
+   - slash-prefixed (`` `/run-tests` ``) → skill
+   - `PascalCase` or `mcp__*` (`` `TaskCreate` ``, `` `mcp__github__get_issue` ``)
+     → tool
+
+   Exclude obvious non-names (paths with an interior `/`, code keywords, and
+   PascalCase words that are plainly prose rather than identifiers — `README`,
+   `JSON`, `HTTP`). When a name is ambiguous, resolving it is cheap and a false
+   `[phantom-tool]` is expensive, so resolve rather than guess.
 3. Apply CLAUDE.md checks:
    - **`[stale-ref]`** — agent name (no `/` prefix) backtick-quoted but
      no matching file in any agent location.
@@ -733,6 +857,15 @@ adoption gaps; (3) notification-sink coverage for long-running work;
      no matching `*/SKILL.md`.
    - **`[stale-ref]`** — hook defined in any settings file but not
      mentioned in CLAUDE.md.
+   - **`[phantom-tool]`** — a tool name resolves nowhere (see **Name
+     resolution**). The instruction around it can never execute as written, so
+     the fix is to delete the reference and rewrite the instruction in terms of
+     what the session does have.
+   - **`[gated-tool]`** — a tool name resolves to something the CLI ships but
+     withholds from this session. The instruction is not fictional, only
+     unreachable here; scope it ("when available") or record the gate, and do
+     **not** delete it — this is the one case where the obvious repair is the
+     wrong one.
    - **`[mismatch]`** — project vs global CLAUDE.md disagree on a tool
      (mypy vs basedpyright; pytest vs unittest; flake8 vs ruff).
    - **`[mismatch]`** — CLAUDE.md says "read docs/" for code style or
@@ -781,6 +914,8 @@ Phase 9 — CLAUDE.md, Coordinators & Notification Sinks
 
   Issues:
   - [stale-ref]   CLAUDE.md backticks 'numpy-expert' — agent file absent
+  - [phantom-tool] ~/.claude/CLAUDE.md names `search_skills` — resolves nowhere; delete the reference
+  - [gated-tool]  ~/.claude/CLAUDE.md startup step loads `TaskCreate` — in the CLI, withheld from this session; scope it
   - [mismatch]    CLAUDE.md says "use mypy" but pyproject pins basedpyright
   - [mismatch]    CLAUDE.md says "read docs/code-style/" — rules auto-load
   - [unused]      coordinator: code-coordinator (not in CLAUDE.md)
