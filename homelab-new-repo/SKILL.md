@@ -40,6 +40,15 @@ that looks right and fails later:
 gh repo create Blue-Sharp/NAME --private --template Blue-Sharp/homelab-template
 gh repo edit   Blue-Sharp/NAME --add-topic homelab --add-topic kubernetes
 git clone https://github.com/Blue-Sharp/NAME ~/Projects/NAME
+
+# Git identity is set PER REPO in this lab -- there is no global user.name, deliberately,
+# because this machine carries several identities and a global one would silently sign
+# unrelated clones with the wrong name. A fresh clone therefore inherits nothing, and the
+# first commit below fails with "Identität des Autors unbekannt" rather than anything that
+# points at the cause. Copy it from a sibling instead of typing it: all repos in the set
+# agree, so there is no value to choose.
+git -C ~/Projects/NAME config --local user.name  "$(git -C ~/Projects/homelab config --local user.name)"
+git -C ~/Projects/NAME config --local user.email "$(git -C ~/Projects/homelab config --local user.email)"
 ```
 
 **The topics are load-bearing, not decoration.** Renovate autodiscovers by the `homelab` topic and
