@@ -94,15 +94,37 @@ kubectl -n postgres get secret discord-webhook -o jsonpath='{.data.address}' | b
       --format yaml > discord-webhook-sealedsecret.yaml
 ```
 
-Then the local gates before pushing — they are cheap and they are what CI will run anyway:
+Then the local gates — they are cheap and they are what CI will run anyway:
 
 ```shell
 kubectl kustomize .                                 # builds; count the objects
 flux schema validate . --config .fluxschema.yml     # all valid
-flux migrate -f . --yes && git diff --stat          # must be empty
 ```
 
-Commit and push, then register with Flux:
+Commit **first**, then run the deprecated-API gate. That order is not a preference — the gate
+compares the working tree against the last commit, so on a fresh clone with everything still
+uncommitted it reports your own scaffolding (ten files, dozens of lines) and tests nothing.
+Run before committing, it cannot fail, which is worse than failing.
+
+```shell
+git add -A && git commit
+flux migrate -f . --yes && git status --porcelain   # must be empty
+git push
+```
+
+**Read CI by commit SHA, never `--limit 1`.** A repo created from the template already has one
+completed run — the template's own scaffolding, which FAILS, because `NAME` is unsubstituted and
+`discord-webhook-sealedsecret.yaml` does not exist there. `gh run list --limit 1` hands you that
+run, already `completed`, so a naive wait loop exits immediately on someone else's failure:
+
+```shell
+sha=$(git rev-parse HEAD)
+gh run list --repo Blue-Sharp/<name> --limit 10 \
+  --json headSha,status,conclusion,databaseId \
+  --jq ".[] | select(.headSha==\"$sha\")"
+```
+
+Then register with Flux:
 
 ```shell
 kubectl apply -f <name>-source.yaml -f <name>-kustomization.yaml
@@ -129,11 +151,26 @@ survey the shared invariants require: a read-only agent that enumerates conventi
 repos **and the live cluster** and reports deviations. Copying the nearest sibling by eye is what
 produced the defects this template exists to prevent.
 
+**One naming decision the survey will surface, worth knowing before you hit it.** A repo whose
+software brings its own Helm chart ends up with two source objects, and they collide by default:
+
+| software name vs repo name | chart's `HelmRepository` | self-registration `GitRepository` |
+|---|---|---|
+| **same** (`redis-operator`, `cert-manager`, `traefik`, `descheduler`) | `<name>-chart-source.yaml` | `<name>-source.yaml` |
+| **differ** (`cnpg-system`/`cloudnative-pg`, `kube-flannel`/`flannel`) | `<software>-source.yaml` | `<repo>-source.yaml` |
+
+The `-chart-source` spelling is the collision case only, NOT the general rule, and it is the one
+exception `repo-conventions.yaml` allows without warning. Getting it wrong in the other direction
+is worse than a warning: Renovate's flux manager only scans `*-source.yaml`, so a chart source
+named anything else silently stops being version-scanned, with no error anywhere.
+
 ## Finish by saying what you did not do
 
 The template deliberately ships these as `TODO`, because none can be generated:
 
 - the repo's own manifests, and the `resources:` list in `kustomization.yaml`
+- `.node-placement.yaml` — ships as an empty `objects: []`, and the build fails the moment a
+  workload renders with no entry in it, which is the point
 - the value-contract step in `.github/workflows/ci.yaml` — the repo's own invariants, kept short:
   only things that fail silently, late, or in another repo
 - `README.md` and `CLAUDE.md` bodies
