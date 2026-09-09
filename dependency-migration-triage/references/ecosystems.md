@@ -69,6 +69,43 @@ diff -u /tmp/render-<old>.yaml /tmp/render-<new>.yaml
 `default`, and a diff of two such renders looks fine while telling you nothing about where
 anything lands.
 
+**Pass `--api-versions` for capability-gated templates.** Anything behind `.Capabilities`
+renders as nothing without it, which reads in a diff as "this object was removed":
+`--api-versions monitoring.coreos.com/v1 --api-versions gateway.networking.k8s.io/v1`.
+
+**`helm dependency update` first, if you render from a chart source directory** — required even
+when every subchart condition is false, or the render fails outright. A release *tarball*
+already contains its subcharts, which is one good reason to prefer one.
+
+**Fetching the chart without configuring a repo.** Pins the version by construction and leaves
+no local helm repo state behind:
+
+```shell
+curl -sSL -o chart.tgz \
+  https://github.com/<owner>/<repo>/releases/download/<chart>-<ver>/<chart>-<ver>.tgz
+tar xzf chart.tgz
+```
+
+**`helm` may not be installed — render it from a container rather than skipping the phase.**
+This render is too load-bearing to abandon over a missing binary:
+
+```shell
+podman run --rm -v "$PWD:/w:z" --entrypoint helm docker.io/alpine/helm:3.19.0 \
+  template <releaseName> /w/<chart-dir> -n <namespace> -f /w/values.yaml
+```
+
+The `:z` relabel is required on SELinux hosts (Fedora, RHEL); without it the mount is unreadable
+inside the container.
+
+**Extract the `values:` block with a YAML parser**, not by hand — and note `yq` may be absent
+too, in which case `python3 -c "import yaml, ..."` does the same job. Hand-reindenting a large
+values block is its own source of false findings.
+
+**Diff per object, not as text.** Key both renders by `(kind, namespace, name)`, normalise
+`helm.sh/chart`, `app.kubernetes.io/version` and any `chart:` label to a placeholder, then
+report added / removed / changed separately. Without that, version-label churn buries the real
+changes — measured at ~1,800 changed lines hiding 7 real ones on a 120-object chart.
+
 Then the repo's own gates: `flux schema validate . --config .fluxschema.yml`, and the shared
 policy job if the lab has one. Reconcile order when you do go live is source → Kustomization →
 HelmRelease; forcing a HelmRelease against a stale source just makes you fight the old spec.
