@@ -11,8 +11,9 @@ description: >-
   conceptual/behavioral ones (a version bump can quietly change defaults or strictness with no
   signature change at all), verify whether existing checks would actually catch a regression in
   that exact spot or merely execute the line with stale data, write a regression test that
-  fails on the old behavior when a real issue is found, fix what's fixable, and report back
-  linking the originating bot PR. Use this whenever the user wants to review, assess, migrate,
+  fails on the old behavior when a real issue is found, fix what's fixable, report back linking
+  the originating bot PR, and after the merge return to settle whatever could not be verified
+  before it. Use this whenever the user wants to review, assess, migrate,
   or avoid "merging blindly" a Renovate/Dependabot PR; asks "what changed" or "what needs to
   adapt" for a dependency bump; wants confidence a version bump is safe beyond "CI is green";
   or just pastes a bot PR number/link and asks to check it out. Trigger even for dependencies
@@ -34,8 +35,9 @@ Read `references/case-studies.md` before Phase 4 if this is your first time runn
 or whenever a phase result feels uncertain. Its four worked examples come from a Python repo,
 but every lesson in it is about evidence, not about Python.
 
-Work through these phases in order. Scale depth to actual signal (see "Right-size the
-investigation" before Phase 1) — a trivial patch bump of a barely-used tool doesn't warrant the
+Work through Phases 0-8 in order, then Phase 9 after the bump is actually merged — it is the
+only one that runs in a later sitting, and the one most easily lost. Scale depth to actual
+signal (see "Right-size the investigation" before Phase 1) — a trivial patch bump of a barely-used tool doesn't warrant the
 same effort as a major-version jump of something running in production, and pretending otherwise
 produces padded reports, not better decisions.
 
@@ -90,9 +92,27 @@ For a wide range, you don't need to quote every entry — you need to have actua
 know whether something in it touches what this repo uses.
 
 For a Helm chart, note that a chart has **two** version numbers and they move independently: the
-chart version Renovate bumped, and the `appVersion` of the software inside it. Read the release
-notes for both. A chart-only bump can still change the application, and an appVersion bump can
-land with no chart changes at all.
+chart version Renovate bumped, and the `appVersion` of the software inside it. A chart-only bump
+can still change the application, and an appVersion bump can land with no chart changes at all.
+
+**Treat the `appVersion` move as a second dependency and run Phases 1 and 2 against it
+separately**, rather than as a footnote to the chart's own notes. In practice this is where the
+findings are — the chart diff is routinely a handful of trivial lines while the application diff
+is thousands. From one run: authentik's chart delta was version labels and a quoting change,
+while the app moved ~3,300 lines and rewrote its proxy outpost in another language;
+`plugin-barman-cloud` 0.7.1 -> 0.8.0 never mentioned in any note that its appVersion went
+v0.14.0 -> v0.15.0, and the entire substance of that bump was app-side. Read the appVersion out
+of `Chart.yaml` at **both** tags; the PR title names only one of the two numbers.
+
+**If the target is a prerelease (`-rc`, `-alpha`, `-beta`), add an issue search.** A prerelease
+exists because it is expected to have defects, and the ones that matter are filed *against the
+tag after it ships* — no diff can show you those. Search the project's issues for the version
+string, and for every candidate fix compare the **closing PR's merge date against the tag date**:
+a fix merged after the tag is not in the release you are about to deploy, and a newer tag
+existing is not by itself evidence that it is. This is what produced a DO-NOT-MERGE verdict on
+rustfs `1.0.0-rc.5` — two write-availability regressions whose fixes merged five days after the
+tag was cut, one of which stopped all writes on a single-volume node after a day of uptime while
+the pod stayed `Ready` throughout.
 
 ## Phase 2 — Read the diff between the two tags
 
@@ -140,6 +160,26 @@ Two habits make that safe:
   (`gh api repos/<o>/<r>/contents/<path>?ref=<tag> --jq .content | base64 -d`). Absence of
   evidence here really is not evidence of absence.
 
+**On a large repo, skip `compare` and diff the recursive git trees instead.** Two calls — one per
+tag — list every blob SHA in the repository at that commit, so the added / removed / changed set
+is exact, complete, and structurally impossible to truncate:
+
+```shell
+for t in <old-tag> <new-tag>; do
+  gh api "repos/<o>/<r>/git/trees/$t?recursive=1" \
+    --jq '.tree[] | select(.type=="blob") | "\(.path) \(.sha)"' | sort > "/tmp/tree-$t.txt"
+done
+diff /tmp/tree-<old-tag>.txt /tmp/tree-<new-tag>.txt
+```
+
+Two identical blob SHAs are *proof* of byte-identity, which is the strongest available form of
+the "proving non-change" argument this phase rests on — and it costs one API call per tag rather
+than a hunt through hunks. Fetch the patch only for the paths this shows actually moved.
+
+**In a monorepo, filter to the subtree you consume before judging anything by size.** A compare
+between two chart tags in a chart monorepo spans every other chart's commits; "412 files changed"
+means nothing until you restrict to `charts/<name>/`.
+
 Extract, in the order that decides things:
 
 1. **Which files changed.** Cross-reference against Phase 3's usage sites. A change confined to
@@ -164,6 +204,19 @@ Worked outcomes, all from real runs of this skill:
   answered both by showing the relevant entry-point name and class body byte-identical across
   the tags. A changelog cannot tell you that something is unchanged; only the diff can.
 
+**Two mirror-image traps, each of which reads as a finding and is not:**
+
+- **A file's presence in the changed list is not evidence your output changed.** Three rule
+  templates changed between two chart versions while the rendered rules came out byte-identical,
+  because every hunk sat behind a conditional this repo never enters. "Changed file" to "changed
+  behaviour" is an inference, and Phase 5's render is what settles it.
+- **A new key in the new version's schema is not evidence of new behaviour.** The old version may
+  have done the same thing by a different mechanism, in which case reporting it as "new in vN" is
+  simply wrong. kube-prometheus-stack v90 added an `authorization:` block to the etcd
+  ServiceMonitor values, which read as v90 newly putting a bearer token on a plaintext scrape;
+  rendering v88 showed it already sent one, via `bearerTokenFile`. What changed was the
+  *mechanism*, not the behaviour — and the schema diff could not tell them apart.
+
 Track which source each later claim rests on. "Read in the diff" and "stated in the changelog"
 are different strengths of evidence, and Phase 8 asks you to report them apart.
 
@@ -180,6 +233,34 @@ HelmRelease's `values:` block** — that is your interface to the chart, and a k
 renamed or removed does not error, it is silently ignored. For a container image it is the
 assumptions around it, not inside it: UID, entrypoint, paths, env. For an Action it is the
 `with:` inputs you pass and the outputs you consume.
+
+**Then widen it: usage is also everything else in the repo that hardcodes a value this
+dependency controls.** This is the highest-value widening available in this phase, and it gets
+missed precisely because the obvious interface looks complete. Once you know the version numbers
+involved, grep the repo for the *old* ones:
+
+```shell
+grep -rn "<old chart version>\|<old appVersion>\|<old image tag>" . --exclude-dir=.git
+```
+
+In one run that is what found a CI workflow pinning `promtool` to "whatever Prometheus the
+cluster runs" — a version the chart bump silently invalidated, sitting in a file nobody would
+open while reviewing a HelmRelease. CI workflows, Ansible vars, Dockerfiles, README commands,
+dashboards and alert rules all hardcode versions, images and metric names that a bump can move
+underneath them.
+
+**Ask once per triage whether a second repo has to move in lockstep.** Some dependencies are
+coupled to something declared elsewhere — a CLI to the controller it talks to (`kubeseal` and
+the sealed-secrets controller), a validator to the server whose rules it checks (`promtool` and
+Prometheus). A bot bumps one side and structurally cannot see the other. If your bot config
+*ignores* a dependency, that ignore rule is documentation that a coupling exists — read the
+ignore list as part of this phase.
+
+**A key of yours that is absent from the parent chart's `values.yaml` is not necessarily a
+dropped key.** `helm show values <parent>` does not expand subchart defaults, so a legitimately
+set subchart key (`grafana.*`, `kube-state-metrics.*`) reads as absent and manufactures a
+"removed upstream" finding. Resolve subchart keys against the subchart's own values, or settle
+it with the render.
 
 ## Phase 4 — Migration plan: interface changes AND conceptual/behavioral ones
 
@@ -223,6 +304,33 @@ chart versions with **this repo's actual `values:`** and diffing the output — 
 thing that surfaces a silently-ignored key, since a wrong key renders nothing while every object
 reports Ready and CI stays green.
 
+**Diff per rendered object, never as one text blob.** Every object carries `helm.sh/chart` and
+`app.kubernetes.io/version` labels, so a raw diff of a large chart is almost entirely label
+churn — measured at roughly 1,800 changed lines concealing 7 real changes. Parse both renders
+into a map keyed by `(kind, namespace, name)`, normalise the version labels to a placeholder,
+and report three sets: objects **added**, objects **removed**, objects whose normalised body
+**changed**. That turns an unreadable diff into a short list, and added/removed are findings in
+their own right — one major bump added exactly one object, a service-account-token Secret, and
+that was the entire story of the upgrade.
+
+`references/ecosystems.md` carries the render mechanics that change the *answer* rather than
+merely being convenient — the namespace flag, capability gating, subchart resolution, and how to
+render at all when `helm` isn't installed. Getting any of them wrong produces a confident,
+wrong, well-formatted diff.
+
+**A policy or contract that asserts your *declared* values cannot catch this class of bug at
+all.** It reads the same file you wrote, so a key the chart quietly stopped consuming still sits
+there with the right value and the assertion still passes — which is exactly how an
+`insecureSkipVerify` setting survived a major bump as a dead key with CI green and a contract
+explicitly guarding it. Repointing such an assertion after a move restores the guard for *that*
+move and does nothing for the next one. Only the render knows whether the chart consumes a key,
+so a check meant to guard a value's *effect* has to assert against rendered output, not source.
+
+**For a JavaScript Action with a committed `dist/`, compare the `dist/index.js` blob SHA across
+the two tags.** That is cheaper *and* stronger than running the workflow on a branch: identical
+SHAs prove zero runtime change, whereas a green run proves only that one path worked once. It
+cleared `renovatebot/github-action` v46.2.2 -> v46.2.5 in a single API call.
+
 ## Phase 6 — Write a regression test, only when there's a real finding
 
 If Phase 4/5 turned up an actual breaking change with inadequate coverage: write a check that
@@ -261,6 +369,11 @@ work before Phase 8:
 
 ## Phase 8 — Report, mirroring the migration
 
+**Settle this before composing anything: is this a dry run?** If no real PR exists, or you were
+asked to exercise this skill itself, stop after producing the would-be title, body and diff and
+say so explicitly — do not call `gh pr comment` or `gh pr create`. Deciding it *after* the
+report is written is how a comment gets fired at a PR that should never have received one.
+
 Report on the bump PR — a comment on it when there's nothing to change, a PR against it or a
 companion PR when there is (follow the repo's own branch conventions; check recent merged PRs
 for the base branch). The write-up must:
@@ -271,13 +384,53 @@ for the base branch). The write-up must:
   actually invoked against the new version), *read in the diff* (Phase 2 — a file list proving
   unreachability, a hunk read directly), or *inferred from changelogs*. The middle tier is the
   one that gets silently promoted to the first or demoted to the third; name it as its own thing.
+- **Name the adjacent instances of anything you fix, and say whether they are in scope.** A
+  finding rarely has exactly one site. Dropping a pointless credential from the etcd scrape left
+  the identical exposure on the `kube-proxy` and `coredns` scrapes, same one-line fix each; a
+  report that fixes one and is silent about the rest reads as complete and is not. Enumerate the
+  siblings even when you deliberately leave them alone, and say why you did.
+- **Say what a merge will visibly do**, when it does anything: which workloads restart, whether
+  it is an in-place restart or a switchover, how long it took to reconcile, and what has to be
+  true beforehand (a fresh backup, a quiet window). "Safe to merge" and "safe to merge right
+  now" are different claims.
 - If nothing needed fixing, say so plainly — "verified: the following was checked and nothing
   needs to change" — rather than staying silent. Silence is indistinguishable from not looking.
 - Let the maintainer choose their own depth: deep-review the finding, or trust it and merge.
 
-If this run is a **dry-run / calibration** (no real PR or comment should be posted — e.g. while
-testing this skill itself), stop after producing the would-be title, body and diff, and say so
-explicitly instead of calling `gh pr create` or `gh pr comment`.
+## Phase 9 — Close the loop after the merge
+
+Almost every triage ends with claims it *could not* execute: runtime properties no pre-merge
+check can reach ("does this Kubernetes version still populate a manually created token
+Secret?"), schema effects that only exist once migrations have run, a backup path that has to
+actually run once. Phase 8 makes you label those honestly. This phase exists because labelling
+them is where it otherwise stops — the verdict gets written, the PR gets merged, and nobody
+returns to the sentence that said *inferred, not executed*.
+
+**While still in Phase 8, for each claim you are about to file as inferred, write down the exact
+command that would settle it and what result counts as a pass.** Expressed as prose, a
+post-merge check is a task somebody has to re-derive; expressed as a command with a pass
+condition it is a two-minute mechanical pass. "Confirm the outpost still works" is the first
+kind. "`select ... from django_migrations`, and the through model must reuse the existing table
+rather than create a new one" is the second.
+
+**After the merge reconciles, run them and post the outcome as a follow-up comment on the merged
+PR.** That comment is the only place the two halves of the evidence ever meet; merging closes
+the PR, it does not close the triage. Three claims filed as unverifiable in one session, each
+settled in minutes once the code was live: a manually created service-account-token Secret *was*
+still populated (1336 bytes); a Django through-model migration *did* reuse the existing table,
+leaving a blueprint's wholesale assignment intact; a backup *did* complete on the new sidecar
+image, in 28 seconds.
+
+**Read a rollout's logs as a curve, not a snapshot.** A single grep for errors right after a
+rollout is near-useless in both directions: startup noise reads as a regression, and a slow
+failure has not happened yet. Sample the same window at least twice, minutes apart, and report
+the trend. A service that emitted 34 warnings in its first minute, then 14, then 4, then 0, with
+zero restarts, is starting up; an identical first sample with a flat count is a service failing
+over and over, and only the second sample distinguishes them.
+
+**Prefer evidence that something *worked* over evidence that nothing complained** — a populated
+series count, a completed backup, a `200` at the end of a redirect chain, a metric with a value.
+An empty error log is also exactly what a component that never started produces.
 
 ## A note on trusting static tools
 
