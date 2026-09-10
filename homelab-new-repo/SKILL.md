@@ -61,8 +61,12 @@ Then substitute, in file contents **and in filenames**:
 cd ~/Projects/NAME
 git mv NAME-source.yaml        <name>-source.yaml
 git mv NAME-kustomization.yaml <name>-kustomization.yaml
-grep -rl NAME . --exclude-dir=.git | xargs sed -i "s/NAME/<name>/g"
-grep -rn NAME . --exclude-dir=.git   # must print nothing
+# WORD-BOUNDED, both of them. A bare s/NAME/.../g also rewrites prose merely CONTAINING the
+# token -- the template's own "TWO NAMES FOR ONE TOOL" became "TWO <name>S FOR ONE TOOL" in
+# every repo created before 2026-09-10, and the check below could not see it, because a
+# mangled word no longer contains NAME. Fixed here and in the template's self-test together.
+grep -rl NAME . --exclude-dir=.git | xargs sed -i "s/\bNAME\b/<name>/g"
+grep -rnw NAME . --exclude-dir=.git   # must print nothing
 ```
 
 That last line matters more than it looks. `NAME` is chosen to be greppable precisely so an
