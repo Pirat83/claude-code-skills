@@ -171,9 +171,8 @@ software brings its own Helm chart ends up with two source objects, and they col
 | **same** (`redis-operator`, `cert-manager`, `traefik`, `descheduler`) | `<name>-chart-source.yaml` | `<name>-source.yaml` |
 | **differ** (`cnpg-system`/`cloudnative-pg`, `kube-flannel`/`flannel`) | `<software>-source.yaml` | `<repo>-source.yaml` |
 
-The `-chart-source` spelling is the collision case only, NOT the general rule, and it is the one
-exception `repo-conventions.yaml` allows without warning. Getting it wrong in the other direction
-is worse than a warning: Renovate's flux manager only scans `*-source.yaml`, so a chart source
+The `-chart-source` spelling is the collision case only, NOT the general rule. No CI check holds
+you to either spelling, and getting it wrong in the other direction fails silently: Renovate's flux manager only scans `*-source.yaml`, so a chart source
 named anything else silently stops being version-scanned, with no error anywhere.
 
 ## Finish by saying what you did not do
