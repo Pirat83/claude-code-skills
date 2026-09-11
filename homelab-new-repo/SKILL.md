@@ -180,8 +180,8 @@ named anything else silently stops being version-scanned, with no error anywhere
 The template deliberately ships these as `TODO`, because none can be generated:
 
 - the repo's own manifests, and the `resources:` list in `kustomization.yaml`
-- `.node-placement.yaml` — ships as an empty `objects: []`, and the build fails the moment a
-  workload renders with no entry in it, which is the point
+- `.node-placement.yaml` — a `NodePlacement` Constraint that ships with an empty `objects: []`,
+  and the build fails the moment a workload renders with no entry in it, which is the point
 - the value-contract step in `.github/workflows/ci.yaml` — the repo's own invariants, kept short:
   only things that fail silently, late, or in another repo
 - `README.md` and `CLAUDE.md` bodies
