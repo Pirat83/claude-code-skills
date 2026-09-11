@@ -182,8 +182,9 @@ The template deliberately ships these as `TODO`, because none can be generated:
 - the repo's own manifests, and the `resources:` list in `kustomization.yaml`
 - `.node-placement.yaml` — a `NodePlacement` Constraint that ships with an empty `objects: []`,
   and the build fails the moment a workload renders with no entry in it, which is the point
-- the value-contract step in `.github/workflows/ci.yaml` — the repo's own invariants, kept short:
-  only things that fail silently, late, or in another repo
+- the repo's value contract — a `ValueContract` Constraint in `.github/policies/NAME-values.yaml`
+  (or `.github/render-policies/` for values that only exist after rendering), kept short: only
+  things that fail silently, late, or in another repo. Never an inline `yq` step in `ci.yaml`
 - `README.md` and `CLAUDE.md` bodies
 - the monitor for anything exposing metrics, which ships in the same commit as the workload
 
