@@ -56,13 +56,6 @@ from `homelab`, and `homelab`'s `architecture.yaml` checks every repo carrying i
 them is silently never restored after a cluster rebuild. (Renovate does NOT use the topic — it
 scans any org repo that ships a Renovate config, which the template's `.github/renovate.json` is.)
 
-**Check once, on the first run after 2026-09-10:** `gh run list -R Blue-Sharp/NAME --limit 3`
-must show the "Initial commit" CI run as *skipped*, not failed. The template's `ci.yaml` guards
-each job with `!(github.event.created && github.ref == 'refs/heads/main')` so GitHub's own
-template commit no longer mails a red run; that `created` is `true` on a template-generation push
-is inferred, not yet observed. If it ran and failed, the guard does not work — fix it, then delete
-this paragraph. If it was skipped, just delete this paragraph.
-
 Then substitute, in file contents **and in filenames**:
 
 ```shell
