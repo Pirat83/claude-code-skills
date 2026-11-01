@@ -1,14 +1,18 @@
 # Case studies: what this skill exists to catch (and not overclaim)
 
-Four real findings, each illustrating a different failure mode the phases in SKILL.md are
-designed to catch. Read before Phase 4/5 if a result feels uncertain, or as a sanity check on
-your own findings before writing them up.
+Eight real findings, each illustrating a different failure mode the phases in SKILL.md are
+designed to catch. Read before Phase 4 if a result feels uncertain, or as a sanity check on
+your own findings before writing them up. Cases 5 and 8 cite the real PRs the skill's regression
+evals replay, so a run that reads this file already knows those answers: treat such evals as
+regression checks, not as tests of the general wording.
 
-They all come from one Python repo (`pybroker`), because that is where this skill was built. The
-examples are Python; **the lessons are not.** A silently-ignored Helm values key is case study 2
-with different nouns. A chart or image whose default changed underneath you is case study 1. A
-policy engine flagging a rule that is unreachable in context is case study 3. Read them as
-claims about evidence, not about packaging.
+The first four come from one Python repo (`pybroker`), because that is where this skill was
+built; 5-8 come from later runs across npm, GitHub Actions and Python/conda repos. Cases 4-8 are
+all misses made while this skill was being followed. The examples have ecosystems; **the lessons
+do not.** A silently-ignored Helm values key is case study 2 with different nouns. A chart or
+image whose default changed underneath you is case study 1. A policy engine flagging a rule that
+is unreachable in context is case study 3. Read them as claims about evidence, not about
+packaging.
 
 ## 1. Conceptual/behavioral change with no signature change (mypy)
 
@@ -107,3 +111,94 @@ about to spend effort empirically verifying a version (because coverage is absen
 changelog-reading alone can't settle it), that same effort spent on the *old* version too is
 usually cheap relative to what it can reveal, and skipping it means half of what an empirical
 check could tell you never gets asked.
+
+## 5. A green gate that checked nothing (TypeScript 7) — a miss made while following this skill
+
+A TypeScript 6 → 7 bump in an npm repo was triaged and cleared, in part because the `arch`
+(dependency-cruiser) and `dead` (dead-code) gates passed in CI against 7.0.2, and because the
+lockfile showed no tool declaring a `typescript` peer dependency. It was merged.
+
+Later, dependency-cruiser turned out to have been reporting `0 modules, 0 dependencies cruised`
+under TypeScript 7 — and exiting 0. Every `arch` run since the merge had checked nothing. The
+correction in the follow-up PR said it plainly: "the earlier triage cleared it partly because
+`arch` passed in CI. That was wrong; passing with zero inputs is not a pass." TypeScript was
+reverted to 6.x with a bot rule holding it there.
+
+Two things went wrong, and both generalise:
+- **A gate's exit code says nothing about how much it looked at.** The fix is cheap: read the
+  gate's input count on the base branch and the bump branch. A later triage in the same repo did
+  exactly that ("148 modules and 490 dependencies cruised on both") and settled the question in
+  one command.
+- **"No declared peer" is not "compatible".** dependency-cruiser declares TypeScript support in
+  its own `supportedTranspilers` field of `package.json` (`npm view dependency-cruiser
+  supportedTranspilers`), not in `peerDependencies` or `peerDependenciesMeta`, so `npm ls` and
+  the lockfile show nothing and reading peer ranges finds nothing. The rule is general: read the
+  consumer tool's **own** declared support wherever it lives (peer ranges, a `supportedX` field,
+  its docs, its runtime warning). The revert's hold also needs a precise unblock condition
+  (TypeScript >=7.1 AND dependency-cruiser >=18.8; 7.0.x never works): see bots.md, Holds.
+
+This is case study 2 one level up: there, a test executed the line with stale data; here, a gate
+executed with no data at all. Both are green, both are worthless for this bump, and only reading
+what the check actually consumed tells you so.
+
+## 6. A merged pin that never took effect (Helm v4 through nested workflow pins)
+
+A lab's CI renders charts with `helm`, installed by a composite action that a reusable workflow
+pins by SHA, which every consumer repo pins by digest. A bot PR bumped the Helm pin to v4.3.0;
+it was triaged, merged, and the nineteen digest PRs that followed to the consumers all went
+green.
+
+Reading the consumers' job logs showed `helm version --short` printing `v3.21.4`. The inner
+action pins were stale, so neither the Helm bump nor its predecessor had ever reached a
+consumer's CI. "A green mark alone would not have shown this." The fix was a separate PR moving
+the inner pins.
+
+The lesson (Phase 9): when a dependency reaches its consumers through several layers of pins,
+"merged" and "green downstream" are both true while the old version keeps running. The only
+evidence that the bump took effect is the tool reporting its own version where it is consumed.
+The same shape appears whenever one artifact is pinned inside another: a base image inside an
+image, a chart inside an umbrella chart, a lockfile inside a container build.
+
+## 7. "Freeze it" overruled, and "safe to merge" on a dependency nothing used (psycopg2, dash-extensions)
+
+Two verdicts from one Python/conda repo, both technically defensible and both wrong for the user.
+
+**psycopg2.** The bump was test-only, and a conda dry run showed it would drag libpq, libgcc and
+openssl forward onto a production-adjacent host. The triage recommended closing the PR and
+pinning psycopg2 permanently. The user rejected that: "if it is an dependency it needs to be
+managed and updated". The settled outcome was a third option the triage never offered: remove
+psycopg2 entirely and convert the twelve differential tests that used it into golden-value
+tests.
+
+**dash-extensions.** Phase 3 found zero usage, yet the verdict was "safe to merge". The user had
+to ask "so does the codebase even use the dash-extensions?" before removal was on the table.
+Removing it then exposed that six modules imported `pydantic`, which had only ever been installed
+because dash-extensions pulled it in, and `conda remove` tried to delete pydantic along with it.
+
+The lessons (Phase 3 and 4):
+- **A freeze is a cost, not a resting state.** A pinned dependency still has to be maintained; it
+  just stops telling you when it needs it. Whenever a freeze or close is on the table, put its
+  long-run cost next to it, and put *removing the dependency* next to that.
+- **Zero usage is a verdict, not a footnote.** "Unused — remove, don't bump" leads the report.
+- **Removal needs its own check.** What a package provided transitively is usage too. Run the
+  suite with the departing modules blocked before the removal ships.
+
+## 8. Production followed the merge; the developer's machine did not (unternehmen-walkuere)
+
+Nine bot PRs were triaged and rolled out on 2026-11-01. CI and the image install `uv.lock`
+fresh, so both followed every bump. The shared main-checkout `.venv` did not: Python 3.12.14
+against `.python-version` 3.12.15, redis 5.2.1 (lock 8.1.0), quantstats 0.0.62 (0.0.86),
+dotenv 1.2.2 (1.2.4), and `ipython` plus 14 dependencies still installed after the lock dropped
+them.
+
+The drift was known during triage: wheels were tested on a scratch `PYTHONPATH`
+(`uv pip install --target <scratch> --no-deps`) precisely to avoid touching the shared venv.
+But no phase said to bring the venv back in line afterwards, so nothing did. The user had to
+ask "update my local environment".
+
+The lesson (Phase 9): merge closes the repo side; the local side is its own step. Run it once
+after the last merge of a batch, interpreter first, then an exact sync, and prove it with
+`uv sync --frozen --check` ("Would make no changes") plus per-package versions against the
+lock. A green CI says the pins solve, not that this machine matches. The procedure is in
+`local-env.md`; note it compares against the *current* lock (a later commit, #105, re-added
+ipykernel, so "the dropped package is gone" is only true against the lock of that date).

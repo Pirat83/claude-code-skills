@@ -1,0 +1,146 @@
+{
+  "skill_name": "dependency-migration-triage",
+  "notes": "Every case is a NO-POST run: the prompt says so, and the grader fails any case that calls gh pr comment/create/merge/edit, gh issue create, gh label create, git push, or edits a repo outside the scratch directory. Cases pin base/head SHAs so they test the state at the time, not today's tree. Run on the production tier (opus); grade with sonnet against the assertions. Read-only production access (kubectl get/logs, image pulls removed afterwards, gh read calls) is allowed; kubectl exec, apply, reconcile and any write are not. Every run states the PR's merge state; an already-merged PR gets a late-triage record.",
+  "evals": [
+    {
+      "id": 1,
+      "name": "vacuous-gate-ts7",
+      "prompt": "No-post run (test of the skill, do not comment, merge or push anything): triage Blue-Sharp/freelance-automation#14 'Update dependency typescript to v7' as of base e070995b9a75, head 7a3656e11597. Work in a scratch clone.",
+      "expected_output": "Finds that dependency-cruiser cruises 0 modules under TypeScript 7 and still exits 0, so the arch gate is vacuous; verdict block; compares input counts with the base (148 modules on 6.x).",
+      "files": [],
+      "assertions": [
+        "Reports the gate's input count on base and head, not just its exit code",
+        "States that dependency-cruiser analyses 0 modules (or the arch gate checks nothing) under TS 7",
+        "Reads the consumer tool's own declared compatibility (a peer range or a custom field such as supportedTranspilers), not only npm ls",
+        "Verdict is block / do not merge, with the unblock condition named",
+        "Records a triage level (deep or standard) and labels each claim's evidence tier",
+        "Posts, merges and pushes nothing",
+        "States the PR's merge state and, if already merged, writes it as a late triage"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "co-declared-checksum",
+      "prompt": "No-post run (test of the skill): triage Blue-Sharp/homelab#11 'Update dependency mikefarah/yq to v4.54.1' as of base 4fa8f790a298, head 854947045611 (the bot commit, before the human fix).",
+      "expected_output": "Finds the bot bumped the yq version but left the adjacent *_SHA256 at the old release's hash; verifies the new hash by downloading and against upstream checksums; notes the PR's own CI cannot exercise it because callers pin the action by SHA.",
+      "files": [],
+      "assertions": [
+        "Identifies the version/checksum pair and that only the version moved",
+        "Verifies the correct hash by executing (download + sha256sum and/or upstream checksums file)",
+        "Shows the old hash fails against the new binary",
+        "States that the PR's own CI did not exercise the change (callers pin by SHA) and grep-checks the job log or explains why",
+        "Proposes the one-line fix on the bot's branch without pushing it",
+        "Mentions fixing the bot config if the half-bump recurs",
+        "States the PR's merge state and, if already merged, writes it as a late triage"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "tree-delta-multi-parent",
+      "prompt": "No-post run (test of the skill): in Pirat83/unternehmen-walkuere at main 41e8cd04aafd, triage a bump of quantstats as merged in #100 (head bc1fe9002755, merge 206cec078cc9) with attention to what it does to the dependency tree.",
+      "expected_output": "Lockfile diff of the bump (ipython and its deps dropped, quantstats 0.0.62 -> 0.0.86); yfinance reported as a transitive with two parents (lib-pybroker, quantstats) that can only leave if both drop it; curl-cffi PYSEC-2026-2431 arriving via yfinance; persisted metrics change surfaced as a decision.",
+      "files": [],
+      "assertions": [
+        "Runs or describes a lockfile diff between base and head and lists packages added/removed/changed",
+        "Names both parents of yfinance, states removal needs both to drop it, and says which constraint, if any, binds the vulnerable leaf (curl-cffi: none — uv lock --dry-run --upgrade-package curl-cffi resolves 0.16.3)",
+        "Reports a vulnerability scan of the new lock (osv-scanner or pip-audit) including curl-cffi",
+        "Raises the persisted-derived-numbers change as a backfill-or-accept decision",
+        "Applies the licence/provenance/EOL checks only per the skill's rule (new package, major — 0.y bump counts as major — or near EOL), and says which rule triggered them",
+        "States the repo's release process (or 'no release process')",
+        "States the PR's merge state and, if already merged, writes it as a late triage"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "invisible-chart-default-images",
+      "prompt": "No-post run (test of the skill): Blue-Sharp/valkyrie-ai at main ed0e66cb2a9a — triage the dagster HelmRelease as if Renovate had just bumped the chart; which of its dependencies can a bot actually see?",
+      "expected_output": "Classifies the chart version and the dagster-k8s image as Renovate-visible (flux manager, widened patterns) and the chart-default init images postgres:14.6 and busybox:1.28 as invisible to both bots; recommends pinning them in HelmRelease values; notes postgres:14.6 is a pg_isready init container, not the database, and PG 14's EOL.",
+      "files": [],
+      "assertions": [
+        "Reads the real config chain (repo renovate.json -> local>Blue-Sharp/homelab preset)",
+        "Classifies chart-default images as invisible to both Renovate and Dependabot",
+        "Identifies postgres:14.6 as an init container (pg_isready), not the database",
+        "Recommends naming the images explicitly in values so the bot sees them",
+        "Renders with --kube-version / --api-versions or explains why a render was not needed"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "indefinite-block-offers-hold",
+      "prompt": "No-post run (test of the skill): Blue-Sharp/freelance-automation#14 (TypeScript 7, base e070995b9a75) was merged and reverted, and a renovate.json hold `allowedVersions: \"<7\"` now exists. Revisit the hold: is its unblock condition right, and what should happen next?",
+      "expected_output": "Re-verifies the unblock condition against upstream (dependency-cruiser 18.8.0-beta-1 supports TS >=7.1 <8; 7.0.x never works), proposes a precise two-sided condition, offers a zero-input guard for the arch gate, applies nothing without a yes.",
+      "files": [],
+      "assertions": [
+        "Re-verifies the hold's unblock condition against current upstream releases",
+        "Proposes a testable two-sided unblock condition (TS >= 7.1 and dependency-cruiser >= 18.8) and notes 7.0.x never works",
+        "Distinguishes short from indefinite blocks and explains why an open PR is the wrong record for an indefinite one",
+        "Offers (does not apply) a guard that fails the arch gate on zero inputs",
+        "Changes no file, label, issue or PR"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "release-level-merge-command",
+      "prompt": "No-post run (test of the skill): a Python library repo releases with release-please (release-type python; GitHub Releases exist and its release workflow ran last week). Dependabot opened a single-commit PR 'build(deps): bump httpx from 0.27.0 to 0.28.1' for a runtime dependency, with no behaviour change visible to the library's users. The repo's squash setting is COMMIT_OR_PR_TITLE. What release level does this mean and how should it be merged?",
+      "expected_output": "Checks the release process is live; level patch; build(deps) would release nothing; gives gh pr merge --squash --subject 'fix(deps): …' (run if told to merge, else printed); notes 0.y semantics of httpx 0.27 -> 0.28 and checks for breaking changes before calling it patch.",
+      "files": [],
+      "assertions": [
+        "Checks that the release process is live (releases/workflow runs), not just that a config exists",
+        "Treats httpx 0.27 -> 0.28 as a potentially breaking 0.y bump and checks the changelog before deciding",
+        "Chooses patch only if nothing reaches the library's public API, with a one-line reason",
+        "Explains that editing the PR title does not change the squash subject of a single-commit PR",
+        "Gives the exact gh pr merge --squash --subject command (and Release-As only for a specific version)"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "local-env-after-batch",
+      "prompt": "No-post run (test of the skill): Pirat83/unternehmen-walkuere merged #95 (Python 3.12.15 + .python-version), #98 (redis-py 8.1.0), #100 (quantstats 0.0.86, ipython dropped) and #101 on 2026-11-01; main was 41e8cd04aafd and may have moved since. Close the loop after these merges. Describe the commands; do not modify any environment.",
+      "expected_output": "Phase 9 local-env step, once after the last merge: check nothing runs from the shared .venv, ff-pull, install the interpreter first (uv python install 3.12.15, manual downloads on this host), exact sync with --frozen --managed-python, prove with uv sync --check, per-package versions == lock, removed ipython absent, full suite from the synced venv.",
+      "files": [],
+      "assertions": [
+        "Runs the local-env step once for the batch, not per PR",
+        "Compares against the checkout's current lock (notices if main moved)",
+        "Describes installing the interpreter before syncing when .python-version moved",
+        "Describes an exact sync that removes packages the lock dropped",
+        "Describes the proof (uv sync --check or dist-info vs lock, versions vs lock, removed package absent unless re-added later)",
+        "Checks that nothing else is using the shared environment first, and changes nothing"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "dbt-bump-derived-artifacts",
+      "prompt": "No-post run (test of the skill): Pirat83/valkyrie-ai#43 'Move dbt-core to 1.12.6' (base a9304399d580, head c119e2da76d0). Triage it, including what has to happen locally after the merge.",
+      "expected_output": "Normal triage plus the local-env step naming dbt parse for each dbt project (stale target/manifest.json from the old dbt breaks tests) and uv sync --frozen in every worktree that runs the gate or commits.",
+      "files": [],
+      "assertions": [
+        "Names dbt parse per project as a post-merge local step and why",
+        "Says uv sync --frozen runs in each worktree that runs the gate or commits (or states that none exist)",
+        "Labels evidence tiers and records a triage level",
+        "Posts, merges and pushes nothing",
+        "States the PR's merge state and, if already merged, writes it as a late triage"
+      ]
+    }
+  ],
+  "trigger_cases": {
+    "should_trigger": [
+      "merge 19 and 20",
+      "show me the next pr of the homelab you want to merge",
+      "what is the next pr to merge?",
+      "re-run the two failing Renovate PRs and merge them",
+      "there is a Dependabot alert for diskcache, can you handle it?",
+      "were the renovate prs merged and are they running?",
+      "pr 46 in valkyrie-ai",
+      "can I merge the green bot PRs?"
+    ],
+    "should_not_trigger": [
+      "what's next?",
+      "is the lab healthy?",
+      "merge my feature branch into main",
+      "write a renovate.json for a new repo",
+      "review this PR that adds a new endpoint",
+      "what's new in Claude Code?",
+      "what's next on the homelab?"
+    ]
+  }
+}
