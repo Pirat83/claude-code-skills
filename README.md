@@ -25,6 +25,7 @@ That's it. Claude Code auto-discovers skills in `.claude/skills/`.
 | [`matplotlib-render-review`](matplotlib-render-review/) | Render charts to PNG, read back with vision, iterate | Any matplotlib visualization work |
 | [`gws-sheets-verify`](gws-sheets-verify/) | Screenshot Google Sheets via Playwright, verify visually | Google Sheets automation (sorting, formatting, borders) |
 | [`tune-up`](tune-up/) | 6-phase audit of your Claude Code setup | Permissions bloat, stale agents, skill quality |
+| [`dependency-migration-triage`](dependency-migration-triage/) | Triage Renovate/Dependabot bumps so merges are safe and the dependency tree stays small and healthy; recommends the release level | Merging bot PRs without merging blindly |
 
 ## Features
 
@@ -92,6 +93,26 @@ cp -r tune-up/ /path/to/project/.claude/skills/  # Install per-project
 4. Validates CLAUDE.md for contradictions and outdated instructions
 5. Presents a severity-ranked summary
 6. Applies approved fixes
+
+### dependency-migration-triage
+
+Goal: triage each bump safely and keep the dependency tree as small and healthy as possible. Triages Renovate and Dependabot version-bump PRs on evidence rather than a green check: the real changelog, the source diff between the two tags, the repo's actual usage, the tree delta of the bump (every transitive that moved, with all its parents), which bot can see which dependency, and proof that the checks ran the new version at all. Ends with a recorded triage level, the semver level for your own release (where the repo uses release-please), and bringing the local environment in line after the merge. Covers Python (uv/Poetry/pip/conda), npm, Helm under Flux, Kustomize, container images, GitHub Actions, Ansible and stateful components, and handles batches and one shared change fanned out as many PRs.
+
+```bash
+cp -r dependency-migration-triage/ ~/.claude/skills/
+```
+
+**Requirements:** `gh` CLI authenticated; ecosystem tools as needed (`helm` or `podman`, `uv`, `npm`)
+
+**How it works:**
+1. Identifies the bump (or groups a batch — see `references/batches.md`)
+2. Reads the changelog across the full range, then the source diff between the tags
+3. Maps changes to real usage sites and co-declared values (checksums, version files), then computes the tree delta of the bump
+4. Classifies interface vs behavioural changes, and checks whether existing gates actually exercised the new version
+5. Fixes what is fixable on the bot's branch, with a regression test when there is a real finding
+6. Reports on the PR with evidence tiers, a triage level and the release level, then returns after the merge to settle what could not be verified before it and to bring the local environment in line
+
+Evals live in `dependency-migration-triage/evals/evals.json` (no-post cases pinned to real PRs and SHAs).
 
 ## Contributing
 
