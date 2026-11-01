@@ -26,6 +26,14 @@ Otherwise **patch**. Dev/test/CI-only change -> **no release** (`chore`). Where 
 stricter than the rule (a library's raised floor is "major if unsure"), the row wins; where the
 rule is stricter (the operator must act on a base-image bump), the rule wins.
 
+**"Dev-only" is decided by the lock, not by the declaration.** In a single-lock project (a uv
+workspace, one `package-lock.json`) a pin in a dev group also moves a package that a runtime
+dependency pulls in. If `uv tree --frozen --invert --package <pkg> --no-dev` (npm: `npm explain
+<pkg>` showing a non-dev path) still shows a runtime path, the bump changes what production
+installs: triage it as runtime (at least `fix(deps)`), whatever the bot's `chore(deps-dev)` title
+says. Seen on valkyrie-ai#58: `dbt-common` pinned in valkyrie-orchestrator's dev group, yet
+reached at runtime via dbt-adapters → dbt-core → dbt-postgres.
+
 | Change | Library | Application / service / deploy repo |
 |---|---|---|
 | In-range or lockfile-only bump of a runtime dep | patch | patch |
