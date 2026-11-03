@@ -111,7 +111,7 @@ Files in the repo:
   `googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0`,
   `permissions: contents: write, pull-requests: write, issues: write` (issues for labels).
   `token` defaults to `GITHUB_TOKEN`. In Blue-Sharp repos use
-  `runs-on: ${{ vars.CI_RUNNER || 'arc-runners' }}` (homelab-health flags hosted runners).
+  `runs-on: ${{ vars.CI_RUNNER || 'blue-sharp' }}` (homelab-health flags hosted runners).
 - `release-please-config.json`: `release-type: simple`, `include-component-in-tag: false`.
 - `.release-please-manifest.json`: `{".": "<current version>"}`. release-please finds the
   existing `vX.Y.Z` tag from the manifest. `bootstrap-sha` is only a safety net and is ignored
