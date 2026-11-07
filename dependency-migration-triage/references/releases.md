@@ -95,9 +95,12 @@ gh pr merge <n> --squash --subject "feat(deps)!: <what consumers must do>" --bod
 gh pr merge <n> --squash --subject "fix(deps): ..." --body "Release-As: 2.0.0"     # specific version
 ```
 
-`Release-As: x.y.z` is read from the commit **body**; whether the key is case-insensitive is
-*unverified*, so write it exactly as shown. Use it only when the user wants a specific
-version.
+`Release-As: x.y.z` is read from the commit **body** (case-insensitive, per release-please's README).
+Use it only when the user wants a specific version, or to release a commit whose type cuts nothing:
+it also works on a `chore(deps-dev): …` title, which keeps the type honest. Verified in
+Pirat83/valkyrie-ui 2026-11-02: three dev-tooling bumps merged with their titles unchanged plus
+`--body "Release-As: 0.2.x"` cut v0.2.1-v0.2.3. release-please then lists the chore under
+"Miscellaneous Chores" in the notes.
 
 **Pre-1.0 (`0.y.z`) projects.** By default release-please turns a breaking commit (`!` /
 `BREAKING CHANGE:`) into **1.0.0**. To keep a 0.x project in 0.x, set in
