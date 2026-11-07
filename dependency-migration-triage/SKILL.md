@@ -327,6 +327,14 @@ pinned action → tool) read the tool's own version where it is consumed (case s
 hand-managed hosts assert installed == declared. A different environment than the pinned one is
 reported as such, not as a pass. A bump merged without triage gets one late, posted on the PR.
 
+**A lab-built image is not live when its bump merges.** Blue-Sharp/openbb and Blue-Sharp/ratelimit
+build their own image, and they release by hand-pushed tag, not release-please, so merging a
+Renovate PR there (base image, pip pins, a security fix) builds and publishes nothing; the cluster
+keeps running the old digest, silently. "What runs" there means three more steps: push the next
+`vX.Y.Z` (the repo's own semver), read `repo:tag@sha256:…` from the `Image` run's summary, and
+pin it in the Deployment by its own PR. Then assert that the pod's `imageID` equals that digest.
+Each repo's README ("Releasing a new image") has the exact steps.
+
 **The local environment follows the merge** — once, after the last merge of a batch, against
 the checkout's *current* lock, read-only by default (list the drift, print the commands; change
 the machine only on the user's yes), scoped to what the bump touched: dev venvs and worktrees, derived artifacts (`dbt parse`), the local dev
