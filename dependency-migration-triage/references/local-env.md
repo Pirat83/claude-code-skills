@@ -29,14 +29,14 @@ Evidence behind the rows (author's projects, as examples): after a dbt-core bump
 committing worktree needs its own `uv sync --frozen`; PyCharm module deps are regenerated from
 `pyproject`.
 
-## 2. Worked procedure: a shared uv venv (a private app, 2026-11-01)
+## 2. Worked procedure: a shared uv venv (2026-11-01)
 
 Host-specific details below (paths, tools that need a manual download) are examples from the
 author's machine; read yours.
 
 0. **Re-read the target first, read-only.** `git fetch`, then compare against the current
    `origin/main`, not the merged SHA from the brief: main moves (a later commit may re-add a
-   package the merge dropped; a private app #105 re-added ipykernel/ipython). Also name the
+   package the merge dropped; a later commit re-added ipykernel/ipython). Also name the
    checkout's branch: if it is not the default branch (an unrelated PR's branch can be checked
    out), compare the venv to *that branch's* lock and say the venv reflects it, not main.
 1. **Nobody is using the env.** The `.venv` is shared by every session on the checkout:
@@ -63,8 +63,8 @@ Committing worktrees (the ones whose gate runs pyright or tests) get their own
 
 ## 3. Second example: Flux, four pins and no bot
 
-Four pins of one version that no bot follows together: Ansible `workstation_flux_version`
-(`roles/workstation/defaults/main.yml`), infrastructure `manifests.yaml` `version:`, flux-system
+Four pins of one version that no bot follows together: an Ansible variable for the
+workstation CLI, a `manifests.yaml` `version:`, flux-system
 `gotk-components.yaml`, and the cluster controllers themselves. A Flux bump is **one coupled
 change**, and its last step is the local CLI: Ansible `--check --diff`, the real run
 (user-run), then `which -a flux` and `flux version` against the cluster.

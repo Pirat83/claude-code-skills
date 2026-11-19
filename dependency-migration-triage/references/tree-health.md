@@ -42,7 +42,7 @@ diff prod-<revA>.txt prod-<revB>.txt
 ```
 
 Example
-(a private app, quantstats bump): the lock lost 15 packages, the `--no-dev` export shrank 98 -> 82
+(a quantstats bump): the lock lost 15 packages, the `--no-dev` export shrank 98 -> 82
 lines, because pygments survived only as a dev dependency.
 
 **For every package that moved, appeared or vanished: list ALL parents and the binding
@@ -67,13 +67,13 @@ npm explain X                                                   # each parent an
   from the lock) or from PyPI `requires_dist` for the parent's locked version.
 - Probe once per parent path. A bump that clears the child for parent A says nothing about B.
 - **Removal needs every parent gone; but check whether anything binds the version at all.**
-  a private app: `yfinance` is never declared nor imported; `uv tree --invert --package
+  Example: `yfinance` is never declared nor imported; `uv tree --invert --package
   yfinance` shows it arrives only via `lib-pybroker` and `quantstats`, and it drags in
   `curl-cffi` 0.11.1 (PYSEC-2026-2431, fix 0.15.0). Nothing binds `curl-cffi`:
   `uv lock --dry-run --upgrade-package curl-cffi` resolves 0.16.3 (cffi 1.17.1 -> 2.1.1). The
   vulnerable leaf is stale-lock only, fixed by a small lock bump; removal would need both
   parents gone.
-- **npm duplicates.** a private repo: root `undici@8.12.3` beside `undici@7.30.0` under
+- **npm duplicates.** Example: root `undici@8.12.3` beside `undici@7.30.0` under
   `cheerio@1.2.0` (`^7.19.0`), found by `npm explain undici`. A bump that fixes the root copy
   leaves the nested one; `npm dedupe --dry-run` shows what could merge (here it failed on an
   engine mismatch, retry with `--engine-strict=false`; *unverified* beyond that failure).
@@ -93,7 +93,7 @@ backstop for a transitive vulnerable version, run on every triage that touches a
 osv-scanner reads `uv.lock` and `package-lock.json` directly (91 and 333 packages), exit 1 =
 findings, 0 clean, 128 = nothing scannable; it needs the network and marks npm dev deps
 `(dev)`. Its "fixed version" is the lowest fixed release, which may be a major jump, not a safe
-bump. It agreed with pip-audit on a private app: `curl-cffi 0.11.1` and `diskcache 5.6.3` (PYSEC-2026-2447,
+bump. It agreed with pip-audit on one uv project: `curl-cffi 0.11.1` and `diskcache 5.6.3` (PYSEC-2026-2447,
 no fix); pip-audit lists each twice. `npm audit` has known false positives. Mount the single file
 read-only; the table shows `s/uv.lock`. No conda-lock support: pip-audit on `pip freeze` (*unverified*).
 
@@ -108,23 +108,23 @@ pre-existing noise into a blocker.
 metadata, so it MUST run in the project env:
 
 ```shell
-uv run --no-sync --with deptry deptry .      # a private app: 3 issues; bare `uvx deptry .`: ~120 bogus DEP001
+uv run --no-sync --with deptry deptry .      # 3 issues; bare `uvx deptry .`: ~120 bogus DEP001
 ```
 
 - Outside the env it reported 120 to 124 `DEP001` ("`alpaca` imported but missing", the dist is
   `alpaca-py`). Poetry has no `[project]`, so use the Poetry env: `poetry run deptry .`
-  (a private app: 81 issues, mostly notebooks).
+  (81 issues on one Poetry repo, mostly notebooks).
 - uv workspace: run per member directory; a virtual root has no `[project]`. The namespace package
-  `a private app` gives DEP003 false positives (`--per-rule-ignores DEP003=a private app`).
+  `<namespace>` gives DEP003 false positives (`--per-rule-ignores DEP003=<namespace>`).
 - Dev classification: `[dependency-groups]` and Poetry groups are read as dev. `[project.optional-
   dependencies]` count as regular unless `--optional-dependencies-dev-groups tests,docs`. The
   `--help` text says `--dev-optional-dependencies` (stale); `--pep621-dev-dependency-groups` is
   deprecated.
-- Expected noise: deliberately declared runtime-only deps (a private app, as of 2026-11-01:
+- Expected noise: deliberately declared runtime-only deps (as of 2026-11-01 in one repo:
   `psycopg-binary`, `py-spy`, `numba`). Do not fix them silently; document the ignore with its
   reason: `[tool.deptry.per_rule_ignores]` `DEP002 = ["numba", "py-spy"]` (CLI
   `--per-rule-ignores "DEP002=numba|py-spy"`, **run**: 3 issues became 1).
-- deptry does not flag `yfinance` in a private app: nothing imports it and nothing declares it. Only the
+- deptry does not flag `yfinance` there: nothing imports it and nothing declares it. Only the
   tree walk in section 1 finds that.
 - conda `environment.yml` is not supported by deptry; FawltyDeps conda support is *unverified*.
   Fall back to `pipdeptree` plus a grep of imports.
@@ -136,8 +136,8 @@ npx --yes knip --strict       # a runtime import of a devDependency shows only h
 ```
 
 Plain `knip` reports only the unused devDependency, `--production` alone reports nothing. Strict
-excludes tests and config importing dev deps, which is the wanted behaviour. a private repo
-already has `knip` as a devDependency with a `dead` script; its run was clean.
+excludes tests and config importing dev deps, which is the wanted behaviour. The repo
+already had `knip` as a devDependency with a `dead` script; its run was clean.
 
 **Scope.** Is the package in the right place: runtime vs dev vs peer vs optional vs extra? A
 package that only tests import belongs in a dev group (deptry DEP004, knip strict). **Does an extra
@@ -163,7 +163,7 @@ of its EOL, whatever kind of bump this is (PostgreSQL 14: EOL 2026-11-12).
 |---|---|---|
 | Licence change | `curl -s https://api.deps.dev/v3/systems/pypi/packages/<p>/versions/<v> \| jq .licenses` for both versions, `npm` under `/systems/npm/` | **run.** PyPI classifiers are noisy ("non-standard" for yfinance) |
 | Provenance, PyPI | `curl -s https://pypi.org/integrity/<pkg>/<ver>/<file>/provenance` | **run.** 404 = none; pip-audit 2.10.1 had a bundle, `uv 0.9.0` none |
-| Provenance, npm | `npm audit signatures`; deps.dev `slsaProvenances` / `attestations` | **run** (108 verified on a private repo). `slsaProvenances` is npm-only |
+| Provenance, npm | `npm audit signatures`; deps.dev `slsaProvenances` / `attestations` | **run** (108 verified on one npm repo). `slsaProvenances` is npm-only |
 | Install scripts | `npm query ':attr(scripts,[postinstall])'` (also `[install]`, `[preinstall]`) | **run** (found `@googleworkspace/cli`) |
 | Upstream health | deps.dev version `projectStatus` (PyPI only, null on npm); project: `/v3/projects/github.com%2Fpsf%2Frequests` | **run.** Slash MUST be `%2F`. `scorecard` is absent for small repos (curl_cffi, sigstore-js): optional, and dated, not live. A `-1` check = failed to run |
 | Yanked / abandoned | `jq '.urls[].yanked'` on PyPI JSON; release dates from PyPI/npm `time` | yanked **run** (false) |
@@ -191,7 +191,7 @@ image:` audit). The point here: they still run, so inventory and EOL-check them 
 kubectl get pods -A -o json | jq -r '.items[].spec | (.containers + (.initContainers // []))[].image' | sort -u
 ```
 
-On the infrastructure: 64 distinct images, 9 digest-pinned, 55 tag-only, 0 `:latest`. Duplicates worth a
+In one cluster: 64 distinct images, 9 digest-pinned, 55 tag-only, 0 `:latest`. Duplicates worth a
 look: `k8s-sidecar` from two registries at one tag, `busybox` at `1.28` and `stable`, Postgres at
 three lines. This lists spec images; resolved digests are in `status.containerStatuses[].imageID`
 (not queried). Compare with the rendered set to find the undeclared ones above. EOL check per
@@ -213,9 +213,9 @@ and chart contents are not rendered, so run it on the `helm template` output
 (`helm template ... | pluto detect -`, *unverified*). `detect-helm` reads release secrets from the
 live cluster (*unverified*, no cluster contact). Control: a `policy/v1beta1` PodDisruptionBudget
 gives exit 3. `flux migrate -f . --dry-run` covers Flux CRs (**run**: "no custom resources found
-that require migration"; the infrastructure CI already runs it).
+that require migration"; a CI may already run it).
 
-**Actions workflows** (**run**, on infrastructure):
+**Actions workflows** (**run**):
 - `uvx zizmor .github/workflows/`: exit code is a severity bitmask, not 0/1; gate with
   `--min-severity medium`. Offline: 28 findings. `GH_TOKEN=$(gh auth token)` enables online audits
   (40, adds `ref-version-mismatch`; private repos warn on `impostor-commit`). `github-app` and
@@ -224,7 +224,7 @@ that require migration"; the infrastructure CI already runs it).
   required; `-w /r` is how it finds the workflows. SC2012/SC2086 info items are noise
   (`-ignore 'SC2012'`).
 - `pinact run --fix=false --no-api <files>` (both flags; pass files one per argument): exit 2 on an
-  unpinned action; `a private repo/...@<sha> # main` is flagged "requires a version comment".
+  unpinned action; `<org>/<repo>/...@<sha> # main` is flagged "requires a version comment".
   Renovate `pinGitHubActionDigests` already pins, so use pinact only to audit.
 
 **Ansible.** A versionless `requirements.yml` collection is invisible to both bots (bots.md,

@@ -11,7 +11,7 @@ description: >-
   wants more than "CI is green", raises a Dependabot or security alert or an upcoming release,
   or asks whether merged bumps are running. Covers the tree delta of each bump, which bot can
   see what, the semver level for the user's own release, and bringing the local environment in
-  line after the merge. Not for a lab-wide "what's next" sweep (a health-check skill).
+  line after the merge. Not for a whole-infrastructure health sweep.
 ---
 
 # Dependency Migration Triage
@@ -136,7 +136,7 @@ Then grep the repo for the **old** version strings — CI pins, Ansible vars, Do
 made version-neutral, never left as a follow-up.
 
 **Co-declared pairs.** A bot often moves one half: a version beside its `*_SHA256` (five times
-across the `gh`, `yq` and `kubeseal` download pins in one lab), `FROM python:` beside
+across the `gh`, `yq` and `kubeseal` download pins in one repo), `FROM python:` beside
 `.python-version`, a chart beside image tags written explicitly in its `values:` (they don't
 follow `appVersion`; Renovate split one such pair twice), a pin that must equal something running
 elsewhere. Verify the coupled value by
@@ -327,18 +327,11 @@ pinned action → tool) read the tool's own version where it is consumed (case s
 hand-managed hosts assert installed == declared. A different environment than the pinned one is
 reported as such, not as a pass. A bump merged without triage gets one late, posted on the PR.
 
-**A lab-built image is not live when its bump merges.** Two the org repos build their own image
-and release it by hand-pushed tag, not release-please. Merging a Renovate PR there (base image,
-pip pins, a security fix) builds and publishes nothing, and every consumer keeps the old digest,
-silently. "What runs" there means more steps:
-- **a private repo** (a cluster service): push the next `vX.Y.Z` (the repo's own semver), read
-  `repo:tag@sha256:…` from the `Image` run's summary, and pin it in `a self-built service-deployment.yaml` by its
-  own PR. Then assert that the pod's `imageID` equals that digest. Steps: its README, "Releasing a
-  new image".
-- **a private repo** (`a test image`, a TEST image; production runs the operator image):
-  the tag must equal `-- version:` in `config/a self-built image.lua`. The consumers to re-pin are
-  a private app's `compose.yml` and its integration lane. Dependabot proposes that pin there through
-  its `<registry>` registry, so check that it did. Steps: its README, the image section.
+**A self-built image is not live when its bump merges.** If the repo builds and publishes its own
+image and releases it by hand-pushed tag, merging a bump (base image, pip pins, a security fix)
+publishes nothing, and every consumer keeps the old digest, silently. Follow the repo's documented
+release step (tag, then re-pin the digest in each consumer by its own PR) and check that the
+running image's digest equals the new one.
 
 **The local environment follows the merge** — once, after the last merge of a batch, against
 the checkout's *current* lock, read-only by default (list the drift, print the commands; change

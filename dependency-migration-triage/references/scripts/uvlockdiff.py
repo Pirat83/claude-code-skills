@@ -1,6 +1,6 @@
 # usage: python3 -I uvlockdiff.py <repo> <revA> <revB>   (needs Python >= 3.11 for tomllib)
 # prints one line per package whose version set changed: "name: old -> new" ("-" = absent)
-# tested 2026-11-01 on a private app (quantstats, redis changed; ipython dropped)
+# tested 2026-11-01 on a uv project (quantstats, redis changed; ipython dropped)
 import subprocess, sys, tomllib
 repo, a, b = sys.argv[1:4]
 def load(rev):

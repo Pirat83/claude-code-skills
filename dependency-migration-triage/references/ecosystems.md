@@ -128,7 +128,7 @@ helm show chart <name>/<chart> --version <ver> | grep -E '^(version|appVersion|k
 **Explicit image tags in `values:` do not follow `appVersion`, so a chart-only bot PR is a
 half-bump.** If the values pin `image.tag` (dagster-k8s is the case), the chart bump moves
 nothing that runs; the image is a second change that must move with it. Renovate split this pair
-twice (a private app #6/#7 and #17). Group the pair in the bot config or bump them together, and
+twice in one repo. Group the pair in the bot config or bump them together, and
 name the image bump as part of the verdict. Conversely, chart-default images that values do not
 name are invisible to the bots (bots.md).
 
@@ -253,12 +253,17 @@ objects.** Traefik's new HTTP/HTTPS backend rule only mattered for some backends
 live backends and checking each settled it, where reading the rule alone could not.
 
 **A CI-tool bump that renders for every consumer can be triaged by rendering every consumer.**
-Running the lab's own renderer under both tool versions across all 18 consumer repos, with 0
+Running the repo's own renderer under both tool versions across all 18 consumer repos, with 0
 object differences, was cheaper and stronger than reading the tool's changelog for reachability.
 
 Then the repo's own gates: `flux schema validate . --config .fluxschema.yml`, and the shared
-policy job if the lab has one. Reconcile order when you do go live is source → Kustomization →
+policy job if there is one. Reconcile order when you do go live is source → Kustomization →
 HelmRelease; forcing a HelmRelease against a stale source just makes you fight the old spec.
+`flux reconcile hr <name> --with-source` refreshes the *chart* source only, not the git source
+that holds the HelmRelease object. Right after a merge it re-applied the old chart and printed
+the *old* version as "applied revision" for an ingress-controller chart bump. A probe run then
+measured "no outage" for a change that hadn't happened yet. After a merge, run `flux reconcile source git <repo>`
+then `flux reconcile kustomization <name>`, and check `.status.history[0].chartVersion`.
 
 **Commands that change an answer (Flux/Helm, from real runs):**
 - *Gated templates vanish without capability flags.* Render with
@@ -331,6 +336,12 @@ against both tags is usually the whole experiment.
 **Digest and config proofs.** `skopeo inspect --raw docker://<img>:<tag> | sha256sum` is the
 manifest-list digest a PR's pin should equal; `skopeo inspect --config` for both tags compares
 layers, labels and creation time. Guard with `command -v skopeo`.
+A pod's `status.containerStatuses[].imageID` is **not** that digest for a multi-arch image. The
+node records the platform manifest it pulled. So "imageID ends in the pinned digest" fails on a
+correct rollout (seen on two upstream multi-arch images in one batch). Write the pass condition against the index
+entry: `skopeo inspect --raw docker://<img>@<pinned> | jq -r '.manifests[]|select(.platform.architecture=="amd64").digest'`
+must equal the `imageID` digest, and the pod `spec` carries the pinned reference. Only for a single-arch
+image (typically one you build yourself for one platform) does `imageID` equal the pin itself.
 
 **Stateful image on a copy of real data.** `podman run -d --network none -v <vol>:/var/lib/postgresql/data:O <image>`
 — the `:O` overlay leaves the volume untouched. A long-running process under `timeout` exits 124
@@ -339,6 +350,14 @@ by design: judge by log lines (`failed-to-evaluate|level=error`), not the exit c
 For a post-merge probe in a cluster, go through the Service or ingress. An ad-hoc curl pod can
 return `000` because a NetworkPolicy blocks it, which reads as an outage that isn't there; a
 `kubectl port-forward svc/<name>` takes the real path.
+
+**Alert baselines across a rollout.** Most scrape targets put `pod` (and `instance`) into the alert's
+label set. A rollout therefore starts a *new* alert instance that sits in `pending` for the rule's
+`for:` and then fires again. A `count(ALERTS{alertstate="firing"})` baseline taken inside that
+window misses a long-standing alert, and it then "appears" after the next merge (a disk-health
+alert that had been firing for days). Take the alert baseline *before* the first
+merge of a batch, without the `alertstate` filter, and compare alerts by `alertname` plus the
+stable labels (`device`, `namespace`), not by full label set.
 
 ---
 
@@ -443,7 +462,7 @@ nothing for private orgs) or loop `gh api repos/<o>/<r>/contents/.github/workflo
 `gh repo list <org>`, or grep local clones. A header comment saying callers use `@main` is not
 evidence; read the real `uses:` lines.
 Push the corrected hash to the bot's branch (when pushes are approved). On the second
-recurrence, propose fixing the cause once, but **check the shared preset first**: the infrastructure
+recurrence, propose fixing the cause once, but **check the shared preset first**: a
 customManager's description documents the half-bump as intended, and no Renovate mechanism
 updates a release-asset checksum on its own (regex managers have no sha256 datasource;
 `postUpgradeTasks` needs a self-hosted bot plus `allowedCommands`). Name a mechanism or say none
@@ -516,9 +535,9 @@ ignores `PYTHONPATH` — a harness using it tested the old version three times.
 
 **Become the coverage without fighting a workspace pin.** An old-vs-new arm when the workspace
 pins the package: `PYTHONPATH=<pkg>/src uv run --no-project --isolated --with <pkg>==<old> … python probe.py`
-(and `pytest --noconftest`), repeated with `==<new>` (a private app polars triage). To test a
+(and `pytest --noconftest`), repeated with `==<new>`. To test a
 wheel without touching a shared venv: `uv pip install --target <scratch> --no-deps <wheel>` and
-put `<scratch>` on `PYTHONPATH` (a private app).
+put `<scratch>` on `PYTHONPATH`.
 
 **Two cheap ways to get a "new" arm without building an environment per PR:**
 - *Overlay venv*: `python -m venv --system-site-packages /scratch/ov && /scratch/ov/bin/pip
@@ -556,8 +575,8 @@ change as a data-continuity decision (SKILL.md Phase 4).
 `pip` ecosystem; Renovate through `poetry`.
 
 **Two lockfiles during a migration: which one governs?** Check which is tracked
-(`git ls-files | grep -E 'poetry.lock|uv.lock'`) and which CI installs from. a private app:
-`poetry.lock` tracked, CI uses `./.github/actions/setup-poetry`, `uv.lock` is an untracked
+(`git ls-files | grep -E 'poetry.lock|uv.lock'`) and which CI installs from. In one repo
+`poetry.lock` was tracked, CI uses `./.github/actions/setup-poetry`, `uv.lock` is an untracked
 leftover — never read the untracked one as truth. Everything else (Phase 3, 5, 7) follows the
 Python section with Poetry commands.
 

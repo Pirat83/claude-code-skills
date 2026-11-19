@@ -31,7 +31,7 @@ workspace, one `package-lock.json`) a pin in a dev group also moves a package th
 dependency pulls in. If `uv tree --frozen --invert --package <pkg> --no-dev` (npm: `npm explain
 <pkg>` showing a non-dev path) still shows a runtime path, the bump changes what production
 installs: triage it as runtime (at least `fix(deps)`), whatever the bot's `chore(deps-dev)` title
-says. Seen on a private app#58: `dbt-common` pinned in a private app's dev group, yet
+says. Seen once: `dbt-common` pinned in a workspace member's dev group, yet
 reached at runtime via dbt-adapters → dbt-core → dbt-postgres.
 
 | Change | Library | Application / service / deploy repo |
@@ -77,13 +77,11 @@ under BLANK, protective anywhere the setting differs). Squash-only also makes a 
 `gh pr merge --merge` fail loudly (one rollout script used it; three merge commits landed before
 it was fixed).
 
-Before the rollout the settings differed (measured 2026-11-01): a private app, claude-code-skills,
-a private repo `COMMIT_OR_PR_TITLE`/`COMMIT_MESSAGES` (a single-commit PR squashes with its
-**commit** title, so a PR-title edit did nothing); a private app `PR_TITLE`/`BLANK`
-(footers in the PR body dropped); a private app `PR_TITLE`/`PR_BODY`. For a repo not yet on the
+Repos differ in this setting (`COMMIT_OR_PR_TITLE` squashes a single-commit PR with its
+**commit** title, so a PR-title edit does nothing). For a repo not yet on the
 convention, read the setting (`gh api repos/<o>/<r> --jq '.squash_merge_commit_title,
 .squash_merge_commit_message'`); explicit `--subject` and `--body` are correct under every
-setting. Apply the convention (user-run, per repo; a health-check skill layer 5 §5.9 checks it):
+setting. Apply the convention (user-run, per repo):
 `gh api -X PATCH repos/<o>/<r> -f allow_squash_merge=true -F allow_merge_commit=false -F allow_rebase_merge=false -f squash_merge_commit_title=PR_TITLE -f squash_merge_commit_message=BLANK`.
 
 **When the user said to merge, run the command yourself; otherwise print it for them.** Re-check
@@ -97,8 +95,8 @@ gh pr merge <n> --squash --subject "fix(deps): ..." --body "Release-As: 2.0.0"  
 
 `Release-As: x.y.z` is read from the commit **body** (case-insensitive, per release-please's README).
 Use it only when the user wants a specific version, or to release a commit whose type cuts nothing:
-it also works on a `chore(deps-dev): …` title, which keeps the type honest. Verified in
-a private repo 2026-11-02: three dev-tooling bumps merged with their titles unchanged plus
+it also works on a `chore(deps-dev): …` title, which keeps the type honest. Verified
+2026-11-02: three dev-tooling bumps merged with their titles unchanged plus
 `--body "Release-As: 0.2.x"` cut v0.2.1-v0.2.3. release-please then lists the chore under
 "Miscellaneous Chores" in the notes.
 
@@ -121,8 +119,8 @@ Files in the repo:
 - `.github/workflows/release.yaml`: on push to `main`, one job running
   `googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0`,
   `permissions: contents: write, pull-requests: write, issues: write` (issues for labels).
-  `token` defaults to `GITHUB_TOKEN`. In the org repos use
-  `runs-on: ${{ vars.CI_RUNNER || '<runner-set>' }}` (a health-check skill flags hosted runners).
+  `token` defaults to `GITHUB_TOKEN`. Use your own runner label
+  if CI runs on self-hosted runners.
 - `release-please-config.json`: `release-type: simple`, `include-component-in-tag: false`.
 - `.release-please-manifest.json`: `{".": "<current version>"}`. release-please finds the
   existing `vX.Y.Z` tag from the manifest. `bootstrap-sha` is only a safety net and is ignored
@@ -139,10 +137,9 @@ gh api -X PUT repos/<owner>/<repo>/actions/permissions/workflow \
 
 Caveat: PRs created with `GITHUB_TOKEN` do not trigger CI, and `release.created` follow-on
 workflows will not fire. Fine where no required checks exist; otherwise mint a GitHub App token
-with `actions/create-github-app-token` (already used in a private repo `architecture.yaml`
-and `renovate.yaml`).
+with `actions/create-github-app-token` (commonly used for Renovate and release workflows).
 
-For a manifest-with-packages example, `~/Projects/fritz_exporter/release-please-config.json` is
+For a manifest-with-packages example, `release-please-config.json` in Pirat83/fritz_exporter is
 an upstream-derived config (Pirat83/fritz_exporter is a fork; its releases happen upstream and
 it has never released, so it is a config example, not a running process).
 The release PR is the human gate: it stays open until merged; the first release after the
@@ -155,4 +152,4 @@ its notes list the commit. A `chore`/`build` merge produces neither: say so.
 ## 5. Moving major tags (`v1` for Action repos)
 
 No tool does it (a small `git tag -f v1` step would). It only matters if consumers pin tags.
-The lab pins SHAs, so skip unless asked. Whether immutable releases forbid it: unverified.
+Where actions are pinned by SHA, skip unless asked. Whether immutable releases forbid it: unverified.

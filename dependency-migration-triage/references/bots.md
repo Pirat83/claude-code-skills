@@ -5,8 +5,8 @@ can and cannot put in a PR decides what its PRs — and the absence of one — a
 Facts below are from docs.renovatebot.com, docs.github.com and Renovate's source (checked
 2026-11-01) unless marked *observed* (real PRs/logs) or *unverified*. Repo-specific facts are
 dated: they describe that day's `main`, not a standing truth. Several examples are real PRs from
-this lab's eval runs (a private repo TypeScript 7, a private app); they are worked evidence,
-so a regression eval built on them is contaminated and should say so.
+eval runs; they are worked evidence, so a regression eval built on them is contaminated and
+should say so.
 
 ---
 
@@ -38,14 +38,14 @@ These were each learned the hard way.
   are plain. release-please releases on `feat`/`fix`/`deps`/`!`, so `chore(deps)` and
   `build(deps)` release nothing.
 - **The Dependency Dashboard is not the authority for what Renovate extracts.** *Observed*
-  (a private app, 44.199.0): the `flux` manager extracted `ghcr.io/<owner>/<image>` from
+  (Renovate 44.199.0): the `flux` manager extracted an app image from
   HelmRelease values (live job `depCount` 5 = local extract 5) while the dashboard omitted it.
   For a visibility question use the job log's extracted deps or a local `--dry-run=extract`
   (below); writing a hidden image into values made the local extract list it. The `flux`
   manager read `registry`+`repository`+`tag` shapes and nested list entries
   (`deployments[].image`) there.
-- **A disable rule must name every manager that extracts the dependency.** The infrastructure
-  preset's `ghcr.io/<owner>/<image> app-image rule matched only the `kubernetes` manager, while the
+- **A disable rule must name every manager that extracts the dependency.** A shared
+  preset's app-image rule matched only the `kubernetes` manager, while the
   `flux` manager extracted the same image.
 
 **Dependabot**
@@ -74,16 +74,16 @@ These were each learned the hard way.
 - **Scope of an entry.** `github-actions` with `directory: "/"` scans `.github/workflows` and a
   root `action.yml`, **not** `.github/actions/*` composite actions: use
   `directories: ["/", "/.github/actions/*"]`. `docker` at `/` bumps only the Dockerfile — never
-  compose images (a private app #95 touched `Dockerfile` alone; its timescaledb/redis/rqmonitor
-  compose images were never proposed): add a separate `docker-compose` entry. The `helm`
+  compose images (one observed Dockerfile bump left the compose images
+  untouched): add a separate `docker-compose` entry. The `helm`
   ecosystem is unused in any repo here; its file scope is *unverified*.
 - **Commit prefix.** `commit-message.prefix` works everywhere; `prefix-development` only for
   bundler/composer/mix/maven/npm/pip/uv. Without `commit-message` Dependabot mirrors the repo's
-  history (*observed*: `chore(deps)` in a private app, `build(deps)` in a private repo) — both
+  history (*observed*: `chore(deps)` in one repo, `build(deps)` in another) — both
   release nothing under release-please. A releasing repo sets `commit-message: prefix: fix`,
   plus `prefix-development: chore` where supported, and `include: scope`.
 - **It respects human retitles and commits.** After a retitle plus a pushed commit it never
-  renamed back or force-pushed (*observed*: a private app #41 #56 #98 #100 #101).
+  renamed back or force-pushed (*observed* on several PRs).
 
 **Both**
 - **Lockfile claims are per PR.** Check a lockfile header or format version on each PR rather
@@ -99,23 +99,20 @@ Phase 0 question, per dependency: **Renovate-visible, Dependabot-visible, or inv
 both?** "No PR" means something only if the file is in a bot's scope. Decide from the repo's
 real config chain, never from the bot's name:
 
-1. **Renovate:** local `renovate.json` / `.github/renovate.json` → each `extends` preset. The
-   the org repos use `local><org>/<preset-repo>` = `<preset-repo>/default.json` (read it
-   for `managerFilePatterns`, `packageRules` with `enabled: false`, customManagers,
-   `minimumReleaseAge`). Also `enabledManagers`. Not every repo uses the preset: as of
-   2026-11-01 a private repo `main` extends only `config:recommended` with
-   `enabledManagers: [npm, nvm]` (at eval base e070995 it was `[npm]`; re-read with
-   `gh api repos/<o>/<r>/contents/renovate.json` before quoting).
+1. **Renovate:** local `renovate.json` / `.github/renovate.json` → each `extends` preset. A shared
+   preset (`local>org/repo`) must be read too (`managerFilePatterns`, `packageRules` with
+   `enabled: false`, customManagers, `minimumReleaseAge`). Also `enabledManagers`. Not every repo
+   uses the preset: a repo may extend only `config:recommended` with `enabledManagers: [npm]`
+   (re-read with `gh api repos/<o>/<r>/contents/renovate.json` before quoting).
 2. **Dependabot:** `.github/dependabot.yml` — `package-ecosystem`, `directory`/`directories`,
    `ignore`, `open-pull-requests-limit` (`0` = version updates off, security only).
 3. **Repo security settings:** `gh api -i repos/o/r/vulnerability-alerts | head -1` (204 = alerts
    on) and `gh api repos/o/r/automated-security-fixes --jq .enabled`.
 
 **Coverage state per repo:** *version updates* (a bot config covers it), *security-only* (no
-config, alerts 204, `automated-security-fixes` true — a private repo: Dependabot PRs
-appear, but no version bumps ever), or *none* (ssh-dispatch, vanna-lab, dagster-quickstart: no
-bot proposes anything). A repo with both bots must have a deliberate split (a private repo
-as of 2026-11-01: Renovate owns npm/nvm, Dependabot owns github-actions).
+config, alerts 204, `automated-security-fixes` true — Dependabot PRs
+appear, but no version bumps ever), or *none* (no bot proposes anything). A repo with both bots
+must have a deliberate split (for example Renovate owns npm, Dependabot owns github-actions).
 
 | Thing | Renovate manager | Dependabot ecosystem | Note |
 |---|---|---|---|
@@ -124,7 +121,7 @@ as of 2026-11-01: Renovate owns npm/nvm, Dependabot owns github-actions).
 | requirements.txt | `pip_requirements` | `pip` | `>=` ranges give no bump |
 | conda environment.yml | **none** | `conda` (parser drops extras; see above) | |
 | npm | `npm` | `npm` | |
-| Flux HelmRelease chart | `flux` | **none** | default pattern only `gotk-components.ya?ml`: each repo must widen `managerFilePatterns` (the infrastructure preset does) |
+| Flux HelmRelease chart | `flux` | **none** | default pattern only `gotk-components.ya?ml`: each repo must widen `managerFilePatterns` (a shared preset can) |
 | images in HelmRelease `spec.values` | `flux` — only once patterns are widened; reads `repository`+`tag`, `registry`+`repository`+`tag` and nested list entries (44.199.0, verified) | none | chart-default images not written in the repo are invisible |
 | plain Helm values.yaml | `helm-values`, default `values.ya?ml`, `repository`+`tag` shapes only | none | |
 | Kustomize `images:` / `?ref=` | `kustomize` | none | |
@@ -134,7 +131,7 @@ as of 2026-11-01: Renovate owns npm/nvm, Dependabot owns github-actions).
 | binaries in workflows (`*_VERSION`/`SHA256`) | customManager with `# renovate:` annotation; moves the version, **not** the checksum | none | |
 | Ansible requirements.yml | `ansible-galaxy`, default `(galaxy\|requirements)(.ansible)?.ya?ml` | none | |
 | Ansible vars | customManager with annotation | none | |
-| Flux bootstrap `gotk-components.yaml` | `flux` system manifest | none | infrastructure ignores `flux-system/**` |
+| Flux bootstrap `gotk-components.yaml` | `flux` system manifest | none | a preset may ignore `flux-system/**` |
 | pre-commit | `pre-commit`, off unless `:enablePreCommit` | `pre-commit` | |
 
 **Invisible to both** — "nothing will ever propose this", so surface it (explicit values,
@@ -146,10 +143,9 @@ annotation, or a `helm template | grep image` audit):
 - images that exist only in rendered output;
 - curl'd binaries without a `# renovate:` annotation;
 - a versionless `requirements.yml` (no pin, nothing to bump);
-- `enabled: false` deps — hand-pinned sets (fluxcd actions, prometheus, kubectl in the infrastructure
+- `enabled: false` deps — hand-pinned sets (for example fluxcd actions, prometheus, kubectl in a shared
   preset). They are **also absent from the Dependency Dashboard** (*observed*:
-  `prometheus/prometheus` annotated in infrastructure `alert-rules.yaml:57`, yet the dashboard lists
-  only checkout and yq for that file). Their only record is the preset's `description`: read
+  an annotated `prometheus/prometheus` the dashboard did not list). Their only record is the preset's `description`: read
   the preset, and triage the set together.
 
 ---
@@ -179,9 +175,9 @@ mean reverting it: use the config hold.
 
 **The unblock condition must be precise and testable, on both sides, and re-verified whenever
 the hold is revisited** (upstream moves: a 9-day-old beta had already changed the answer).
-The model is a private repo `renovate.json`; as of 2026-11-01 its description reads
-"drop once the supported range includes 7", which would wrongly clear 7.0.x (7.0.x never works
-with dependency-cruiser; the 7.0.2 run cruised 0 modules). Write it as:
+A hold whose description reads
+"drop once the supported range includes 7" can wrongly clear 7.0.x when 7.0.x never works
+with the consumer tool (observed: dependency-cruiser cruised 0 modules). Write it as:
 
 ```json
 { "matchPackageNames": ["typescript"], "allowedVersions": "<7",
@@ -249,7 +245,7 @@ podman run --rm -v "$PWD:/repo:Z" -w /repo --entrypoint renovate-config-validato
   private repo needs a token (not tested).
 - Lookups for GitHub-hosted deps need `GITHUB_COM_TOKEN` (not `RENOVATE_TOKEN`); without it
   "Rate limit exceeded for api.github.com". Lookup results are *unverified*; extraction was
-  verified (`github-actions: 2 files, 9 deps`; a private app flux `depCount` 5).
+  verified (`github-actions: 2 files, 9 deps`).
 - Local mode reads the repo's own `renovate.json`; `RENOVATE_CONFIG_FILE` does not replace it.
 - `!` in `managerFilePatterns` is not an exclusion; use a `matchFileNames` rule.
 - `npx renovate` needs Node ^24.11; use the container.

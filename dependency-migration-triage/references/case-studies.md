@@ -143,7 +143,7 @@ what the check actually consumed tells you so.
 
 ## 6. A merged pin that never took effect (Helm v4 through nested workflow pins)
 
-A lab's CI renders charts with `helm`, installed by a composite action that a reusable workflow
+A CI renders charts with `helm`, installed by a composite action that a reusable workflow
 pins by SHA, which every consumer repo pins by digest. A bot PR bumped the Helm pin to v4.3.0;
 it was triaged, merged, and the nineteen digest PRs that followed to the consumers all went
 green.
@@ -183,7 +183,7 @@ The lessons (Phase 3 and 4):
 - **Removal needs its own check.** What a package provided transitively is usage too. Run the
   suite with the departing modules blocked before the removal ships.
 
-## 8. Production followed the merge; the developer's machine did not (a private app)
+## 8. Production followed the merge; the developer's machine did not (a uv project)
 
 Nine bot PRs were triaged and rolled out on 2026-11-01. CI and the image install `uv.lock`
 fresh, so both followed every bump. The shared main-checkout `.venv` did not: Python 3.12.14
@@ -200,5 +200,5 @@ The lesson (Phase 9): merge closes the repo side; the local side is its own step
 after the last merge of a batch, interpreter first, then an exact sync, and prove it with
 `uv sync --frozen --check` ("Would make no changes") plus per-package versions against the
 lock. A green CI says the pins solve, not that this machine matches. The procedure is in
-`local-env.md`; note it compares against the *current* lock (a later commit, #105, re-added
+`local-env.md`; note it compares against the *current* lock (a later commit re-added
 ipykernel, so "the dropped package is gone" is only true against the lock of that date).
